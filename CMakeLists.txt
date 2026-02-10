@@ -8,6 +8,8 @@
 #  For buils on github, push tags:
 #  - git tag 1.0.0
 #  - git push origin --tags
+#  For github/scripts folders:
+#  - git add --chmod=+x *
 cmake_minimum_required(VERSION 3.28...3.30)
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/common/bootstrap.cmake" NO_POLICY_SCOPE)

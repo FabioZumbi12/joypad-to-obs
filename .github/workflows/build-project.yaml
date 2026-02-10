@@ -298,7 +298,8 @@ jobs:
           $version = "${{ inputs.version }}"
           if ([string]::IsNullOrEmpty($version)) {
             Write-Host "Searching for latest git tag..."
-            try { $version = git describe --tags --abbrev=0 2>$null } catch { $version = "" }
+            $version = git describe --tags --abbrev=0 2>$null
+            if ($LASTEXITCODE -ne 0) { $version = "" }
           }
           if (-not [string]::IsNullOrEmpty($version)) {
             Write-Host "Updating buildspec.json with version $version"
