@@ -55,6 +55,11 @@ jobs:
             *) echo 'validTag=false' >> $GITHUB_OUTPUT ;;
           esac
 
+      - uses: actions/checkout@v4
+        if: fromJSON(steps.check.outputs.validTag)
+        with:
+          fetch-depth: 0
+
       - name: Download Build Artifacts 📥
         uses: actions/download-artifact@v4
         if: fromJSON(steps.check.outputs.validTag)
@@ -88,28 +93,56 @@ jobs:
             done
           done
 
+      - name: Generate Changelog 📝
+        if: fromJSON(steps.check.outputs.validTag)
+        id: changelog
+        run: |
+          : Generate Changelog 📝
+          if [[ "${RUNNER_DEBUG}" ]]; then set -x; fi
+
+          current_tag="${{ steps.check.outputs.version }}"
+          previous_tag=$(git describe --tags --abbrev=0 --match "[0-9]*.[0-9]*.[0-9]*" ${current_tag}^ 2>/dev/null || true)
+
+          if [[ -z "${previous_tag}" ]]; then
+            logs=$(git log --pretty=format:"- %s (%h)" ${current_tag})
+          else
+            logs=$(git log --pretty=format:"- %s (%h)" ${previous_tag}..${current_tag})
+          fi
+
+          echo "log<<EOF" >> $GITHUB_OUTPUT
+          echo -e "### Changes\n${logs}" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
       - name: Generate Checksums 🪪
         if: fromJSON(steps.check.outputs.validTag)
+        id: checksums
         run: |
           : Generate Checksums 🪪
           if [[ "${RUNNER_DEBUG}" ]]; then set -x; fi
           shopt -s extglob
 
-          echo "### Checksums" > ${{ github.workspace }}/CHECKSUMS.txt
+          checksum_content="### Checksums"
           for file in ${{ github.workspace }}/@(*.exe|*.deb|*.ddeb|*.pkg|*.tar.xz|*.zip); do
-            echo "    ${file##*/}: $(sha256sum "${file}" | cut -d " " -f 1)" >> ${{ github.workspace }}/CHECKSUMS.txt
+            checksum_content="${checksum_content}\n    ${file##*/}: $(sha256sum "${file}" | cut -d " " -f 1)"
           done
+          echo "checksums<<EOF" >> $GITHUB_OUTPUT
+          echo -e "${checksum_content}" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Create Release 🛫
         if: fromJSON(steps.check.outputs.validTag)
         id: create_release
         uses: softprops/action-gh-release@9d7c94cfd0a1f3ed45544c887983e9fa900f0564
         with:
-          draft: true
+          draft: false
           prerelease: ${{ fromJSON(steps.check.outputs.prerelease) }}
           tag_name: ${{ steps.check.outputs.version }}
           name: ${{ needs.build-project.outputs.pluginName }} ${{ steps.check.outputs.version }}
-          body_path: ${{ github.workspace }}/CHECKSUMS.txt
+          generate_release_notes: true
+          body: |
+            ${{ steps.changelog.outputs.log }}
+
+            ${{ steps.checksums.outputs.checksums }}
           files: |
             ${{ github.workspace }}/*.exe
             ${{ github.workspace }}/*.zip
