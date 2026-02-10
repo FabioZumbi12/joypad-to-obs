@@ -20,7 +20,7 @@
   <rect width="1200" height="350" fill="url(#bgGradient)"/>
 
   <!-- Top accent bar -->
-  <rect x="0" y="0" width="1200" height="8" fill="#8b5cf6"/>
+  <rect x="0" y="0" width="1200" height="8" fill="#3399ff"/>
 
   <!-- Title -->
   <text
@@ -32,7 +32,7 @@
     font-weight="700"
     font-family="Arial, Helvetica, sans-serif"
     filter="url(#glow)">
-    GameDetector
+    Joypad to OBS
   </text>
 
   <!-- Subtitle -->
@@ -44,7 +44,7 @@
     font-size="26"
     font-weight="400"
     font-family="Arial, Helvetica, sans-serif">
-    Automatic Twitch and Trovo Category Switcher
+    Turn your Gamepad into an OBS Macro Controller
   </text>
 
   <!-- Legend -->
@@ -52,11 +52,11 @@
     x="600"
     y="250"
     text-anchor="middle"
-    fill="#8b5cf6"
+    fill="#3399ff"
     font-size="20"
     letter-spacing="3"
     font-weight="600"
     font-family="Arial, Helvetica, sans-serif">
-    STEAM • EPIC • GOG • UBISOFT
+    SCENES • SOURCES • AUDIO • MEDIA
   </text>
 </svg>

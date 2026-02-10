@@ -1,3 +1,13 @@
+#  Nightbot SR Plugin for OBS - CMake Build Configuration
+#  This CMake configuration file sets up the build process.
+#  It includes options for enabling the obs-frontend-api and Qt functionalities,
+#  and specifies custom output directories for the built plugin and its associated data.
+#
+#  If the build fail (the folder build_x64 don't exists), run on terminal: cmake --preset windows-x64
+#
+#  For buils on github, push tags:
+#  - git tag 1.0.0
+#  - git push origin --tags
 cmake_minimum_required(VERSION 3.28...3.30)
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/common/bootstrap.cmake" NO_POLICY_SCOPE)

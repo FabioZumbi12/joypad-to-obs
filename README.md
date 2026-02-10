@@ -1,59 +1,64 @@
-# OBS Plugin Template
+![Joypad to OBS](img/banner.svg)
 
-## Introduction
+# Joypad to OBS
 
-The plugin template is meant to be used as a starting point for OBS Studio plugin development. It includes:
+[![GitHub Release](https://img.shields.io/github/v/release/FabioZumbi12/joypad-to-obs)](https://github.com/FabioZumbi12/joypad-to-obs/releases/latest) [![Build Status](https://github.com/FabioZumbi12/joypad-to-obs/actions/workflows/push.yaml/badge.svg)](https://github.com/FabioZumbi12/joypad-to-obs/actions)
 
-* Boilerplate plugin source code
-* A CMake project file
-* GitHub Actions workflows and repository actions
+## Overview
 
-## Supported Build Environments
+**Joypad to OBS** is a powerful plugin that turns any connected gamepad, joystick, or even custom Arduino devices into a fully functional macro controller for OBS Studio.
+ 
+This plugin **does not** provide a visual overlay for your controller. Its purpose is to use your controller as a remote control for OBS, allowing you to bind buttons and axes to actions like switching scenes, muting audio, and controlling media. It provides a physical, tactile way to manage your stream without needing a dedicated macro pad.
 
-| Platform  | Tool   |
-|-----------|--------|
-| Windows   | Visual Studio 17 2022 |
-| macOS     | XCode 16.0 |
-| Windows, macOS  | CMake 3.30.5 |
-| Ubuntu 24.04 | CMake 3.28.3 |
-| Ubuntu 24.04 | `ninja-build` |
-| Ubuntu 24.04 | `pkg-config`
-| Ubuntu 24.04 | `build-essential` |
+## Features
 
-## Quick Start
+*   **Control OBS with Your Gamepad:** Map buttons and analog sticks to a wide range of OBS actions.
+*   **Direct Hardware Access:** No intermediate software needed. The plugin communicates directly with any controller recognized by the operating system (e.g., in Windows' "joy.cpl" Game Controllers panel).
+*   **Platform Support:** Primarily developed and tested for **Windows**. The code includes support for macOS and Linux, but it is currently untested and should be considered experimental.
+*   **Broad Device Compatibility:**
+    *   **Gamepads:** Works with XInput (Xbox), DirectInput (PlayStation, Logitech), and generic USB controllers.
+    *   **Custom Hardware:** Compatible with **Arduino-based devices** that appear as a standard joystick, allowing you to use potentiometers, encoders, and sliders to control OBS.
+*   **Extensive Action List:**
+    *   **Scene Management:** Switch to any scene.
+    *   **Source Control:** Toggle or set the visibility of sources.
+    *   **Audio Control:** Mute/unmute sources, set absolute volume (dB), or adjust volume incrementally.
+    *   **Analog Sliders:** Use an analog stick or a physical slider to control source volume with a configurable response curve (gamma).
+    *   **Filter Control:** Enable or disable filters on any source.
+    *   **Media Source Control:** Play, pause, restart, or stop media sources.
+*   **Intuitive UI:** A dedicated "Tools" menu dialog to create, edit, and manage all your bindings.
+*   **"Learn" Mode:** Simply press a button or move an axis on your controller to assign it to an action.
 
-An absolute bare-bones [Quick Start Guide](https://github.com/obsproject/obs-plugintemplate/wiki/Quick-Start-Guide) is available in the wiki.
+## Requirements
 
-## Documentation
+*   **OBS Studio:** Version 28 or newer.
+*   **Operating System:** Windows 10/11, macOS, or a modern Linux distribution.
 
-All documentation can be found in the [Plugin Template Wiki](https://github.com/obsproject/obs-plugintemplate/wiki).
+## How to Use
 
-Suggested reading to get up and running:
+1.  **Install the plugin:** Download the latest release and copy the files to your OBS Studio plugins directory.
+    *   **Windows:** `C:\Program Files\obs-studio\obs-plugins\64bit\`
+    *   **macOS:** `~/Library/Application Support/obs-studio/plugins/`
+    *   **Linux:** `~/.config/obs-studio/plugins/`
+2.  **Open the configuration window:** In OBS, go to the **Tools** menu and select **Settings for Joypad to OBS**.
+3.  **Add a new binding:**
+    *   Click the **"Add Command"** button.
+    *   Click **"Listen"** and press the button or move the axis on your controller that you want to use.
+    *   Select the **Action** you want to perform (e.g., "Switch Scene", "Set Source Mute").
+    *   Configure the target (e.g., choose the specific scene or source).
+    *   Click **OK** to save the binding.
+4.  Your controller is now ready to control OBS!
 
-* [Getting started](https://github.com/obsproject/obs-plugintemplate/wiki/Getting-Started)
-* [Build system requirements](https://github.com/obsproject/obs-plugintemplate/wiki/Build-System-Requirements)
-* [Build system options](https://github.com/obsproject/obs-plugintemplate/wiki/CMake-Build-System-Options)
+## Building from Source
 
-## GitHub Actions & CI
+If you want to build the plugin yourself, clone the repository recursively and use CMake.
 
-Default GitHub Actions workflows are available for the following repository actions:
+```bash
+git clone --recursive https://github.com/FabioZumbi12/joypad-to-obs.git
+cd joypad-to-obs
+mkdir build && cd build
+cmake ..
+cmake --build . --config Release
+```
 
-* `push`: Run for commits or tags pushed to `master` or `main` branches.
-* `pr-pull`: Run when a Pull Request has been pushed or synchronized.
-* `dispatch`: Run when triggered by the workflow dispatch in GitHub's user interface.
-* `build-project`: Builds the actual project and is triggered by other workflows.
-* `check-format`: Checks CMake and plugin source code formatting and is triggered by other workflows.
-
-The workflows make use of GitHub repository actions (contained in `.github/actions`) and build scripts (contained in `.github/scripts`) which are not needed for local development, but might need to be adjusted if additional/different steps are required to build the plugin.
-
-### Retrieving build artifacts
-
-Successful builds on GitHub Actions will produce build artifacts that can be downloaded for testing. These artifacts are commonly simple archives and will not contain package installers or installation programs.
-
-### Building a Release
-
-To create a release, an appropriately named tag needs to be pushed to the `main`/`master` branch using semantic versioning (e.g., `12.3.4`, `23.4.5-beta2`). A draft release will be created on the associated repository with generated installer packages or installation programs attached as release artifacts.
-
-## Signing and Notarizing on macOS
-
-Basic concepts of codesigning and notarization on macOS are explained in the correspodning [Wiki article](https://github.com/obsproject/obs-plugintemplate/wiki/Codesigning-On-macOS) which has a specific section for the [GitHub Actions setup](https://github.com/obsproject/obs-plugintemplate/wiki/Codesigning-On-macOS#setting-up-code-signing-for-github-actions).
+## License
+This plugin is released under the GPLv2 license.
