@@ -21,6 +21,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <chrono>
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -109,7 +110,7 @@ void JoypadInputManager::RefreshDevices()
 	std::vector<DeviceState> next_states;
 	std::vector<JoypadDeviceInfo> next_devices;
 
-	auto find_existing = [&](const std::string &id) -> DeviceState * {
+	[[maybe_unused]] auto find_existing = [&](const std::string &id) -> DeviceState * {
 		for (auto &state : device_states_) {
 			if (state.id == id) {
 				return &state;
@@ -466,8 +467,8 @@ void JoypadInputManager::CancelLearn()
 void JoypadInputManager::PollLoop()
 {
 	auto last_refresh = std::chrono::steady_clock::now();
-	const double default_threshold = 0.1;
-	const int default_interval_ms = 0;
+	[[maybe_unused]] const double default_threshold = 0.1;
+	[[maybe_unused]] const int default_interval_ms = 0;
 	while (running_.load()) {
 #ifdef _WIN32
 		{
