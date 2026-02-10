@@ -1,11 +1,6 @@
 name: Build Project
 on:
   workflow_call:
-    inputs:
-      version:
-        description: 'The version string to build, derived from the Git tag.'
-        required: false
-        type: string
     outputs:
       pluginName:
         description: Project name detected by parsing build spec file
@@ -89,18 +84,6 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
-      - name: Update Version in buildspec.json 📝
-        run: |
-          version="${{ inputs.version }}"
-          if [[ -z "${version}" ]]; then
-            print "Searching for latest git tag..."
-            version=$(git describe --tags --abbrev=0 2>/dev/null || true)
-          fi
-          if [[ -n "${version}" ]]; then
-            print "Updating buildspec.json with version ${version}"
-            jq --arg v "${version}" '.version = $v' buildspec.json > buildspec.tmp.json && mv buildspec.tmp.json buildspec.json
-          fi
-
       - name: Set Up Environment 🔧
         id: setup
         run: |
@@ -158,8 +141,6 @@ jobs:
           config: ${{ needs.check-event.outputs.config }}
           codesign: ${{ fromJSON(needs.check-event.outputs.codesign) }}
           codesignIdent: ${{ steps.codesign.outputs.codesignIdent }}
-        env:
-          CLANG_ENABLE_EXPLICIT_MODULES: NO
 
       - name: Package Plugin 📀
         uses: ./.github/actions/package-plugin
@@ -209,18 +190,6 @@ jobs:
         with:
           submodules: recursive
           fetch-depth: 0
-
-      - name: Update Version in buildspec.json 📝
-        run: |
-          version="${{ inputs.version }}"
-          if [[ -z "${version}" ]]; then
-            echo "Searching for latest git tag..."
-            version=$(git describe --tags --abbrev=0 2>/dev/null || true)
-          fi
-          if [[ -n "${version}" ]]; then
-            echo "Updating buildspec.json with version ${version}"
-            jq --arg v "${version}" '.version = $v' buildspec.json > buildspec.tmp.json && mv buildspec.tmp.json buildspec.json
-          fi
 
       - name: Set Up Environment 🔧
         id: setup
@@ -292,21 +261,6 @@ jobs:
         with:
           submodules: recursive
           fetch-depth: 0
-
-      - name: Update Version in buildspec.json 📝
-        run: |
-          $version = "${{ inputs.version }}"
-          if ([string]::IsNullOrEmpty($version)) {
-            Write-Host "Searching for latest git tag..."
-            $version = git describe --tags --abbrev=0 2>$null
-            if ($LASTEXITCODE -ne 0) { $version = "" }
-          }
-          if (-not [string]::IsNullOrEmpty($version)) {
-            Write-Host "Updating buildspec.json with version $version"
-            $content = Get-Content buildspec.json -Raw | ConvertFrom-Json
-            $content.version = $version
-            $content | ConvertTo-Json -Depth 10 | Set-Content buildspec.json
-          }
 
       - name: Set Up Environment 🔧
         id: setup
