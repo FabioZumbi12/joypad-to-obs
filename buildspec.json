@@ -33,13 +33,13 @@
     },
     "platformConfig": {
         "macos": {
-            "bundleId": "com.joypadtoobs.joypadtoobs"
+            "bundleId": "com.github.fabioZumbi12.joypad-to-obs"
         }
     },
     "name": "joypad-to-obs",
     "displayName": "Joypad to OBS",
     "version": "0.0.1",
     "author": "Joypad to OBS",
-    "website": "https://example.com/joypad-to-obs",
-    "email": "contato@example.com"
+    "website": "https://github.com/FabioZumbi12/joypad-to-obs",
+    "email": "admin@areaz12server.net.br"
 }
