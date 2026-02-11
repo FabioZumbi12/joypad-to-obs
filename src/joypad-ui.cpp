@@ -1,6 +1,6 @@
 /*
 Joypad to OBS
-Copyright (C) <Year> <Developer> <Email Address>
+Copyright (C) 2026 FabioZumbi12 <admin@areaz12server.net.br>
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -1181,7 +1181,7 @@ private:
 	bool is_listening_ = false;
 };
 
-} // namespace
+}
 
 JoypadToolsDialog::JoypadToolsDialog(QWidget *parent,
 				     JoypadConfigStore *config,
@@ -1262,6 +1262,10 @@ JoypadToolsDialog::JoypadToolsDialog(QWidget *parent,
 	table_->resizeColumnsToContents();
 }
 
+JoypadToolsDialog::~JoypadToolsDialog()
+{
+}
+
 void JoypadToolsDialog::RefreshBindings()
 {
 	auto bindings = config_->GetBindingsSnapshot();
@@ -1283,12 +1287,22 @@ void JoypadToolsDialog::RefreshBindings()
 		chk_layout->addWidget(chk);
 		table_->setCellWidget(row, 0, chk_widget);
 
-		connect(chk, &QCheckBox::toggled, this, [this, row](bool checked) {
+		std::string device_id = binding.device_id;
+		int button = binding.button;
+		int axis_index = binding.axis_index;
+
+		connect(chk, &QCheckBox::toggled, this, [this, device_id, button, axis_index](bool checked) {
 			auto current = config_->GetBindingsSnapshot();
-			if (row >= 0 && row < (int)current.size()) {
-				JoypadBinding b = current[(size_t)row];
-				b.enabled = checked;
-				config_->UpdateBinding((size_t)row, b);
+			for (size_t i = 0; i < current.size(); ++i) {
+				const auto &b = current[i];
+				if (b.device_id == device_id && 
+					((b.input_type == JoypadInputType::Button && b.button == button) ||
+					 (b.input_type == JoypadInputType::Axis && b.axis_index == axis_index))) {
+					JoypadBinding updated = b;
+					updated.enabled = checked;
+					config_->UpdateBinding(i, updated);
+					break;
+				}
 			}
 		});
 
@@ -1352,39 +1366,59 @@ void JoypadToolsDialog::RefreshBindings()
 		delete_button->setProperty("binding_index", row);
 		table_->setCellWidget(row, 8, delete_button);
 
+		std::string edit_device_id = binding.device_id;
+		int edit_button_input = binding.button;
+		int edit_axis_index = binding.axis_index;
+		JoypadInputType edit_input_type = binding.input_type;
+
 		connect(edit_button, &QToolButton::clicked, this, [this,
-								  edit_button]() {
-			bool ok = false;
-			int row_index =
-				edit_button->property("binding_index").toInt(&ok);
-			if (!ok) {
-				return;
-			}
+								  edit_device_id,
+								  edit_button_input,
+								  edit_axis_index,
+								  edit_input_type]() {
 			auto current = config_->GetBindingsSnapshot();
-			if (row_index < 0 ||
-			    row_index >= (int)current.size()) {
+			size_t target_index = (size_t)-1;
+			for (size_t i = 0; i < current.size(); ++i) {
+				const auto &b = current[i];
+				if (b.device_id == edit_device_id && 
+					b.input_type == edit_input_type &&
+					((edit_input_type == JoypadInputType::Button && b.button == edit_button_input) ||
+					 (edit_input_type == JoypadInputType::Axis && b.axis_index == edit_axis_index))) {
+					target_index = i;
+					break;
+				}
+			}
+			if (target_index == (size_t)-1) {
 				return;
 			}
 			JoypadBindingDialog dialog(this, input_,
-						   &current[(size_t)row_index]);
+						   &current[target_index]);
 			if (dialog.exec() == QDialog::Accepted) {
-				config_->UpdateBinding((size_t)row_index,
+				config_->UpdateBinding(target_index,
 						       dialog.Binding());
 				RefreshBindings();
 			}
 		});
 
+		std::string delete_device_id = binding.device_id;
+		int delete_button_input = binding.button;
+		int delete_axis_index = binding.axis_index;
+		JoypadInputType delete_input_type = binding.input_type;
+
 		connect(delete_button, &QToolButton::clicked, this,
-			[this, delete_button]() {
-				bool ok = false;
-				int row_index = delete_button
-							->property("binding_index")
-							.toInt(&ok);
-				if (!ok) {
-					return;
+			[this, delete_device_id, delete_button_input, delete_axis_index, delete_input_type]() {
+				auto current = config_->GetBindingsSnapshot();
+				for (size_t i = 0; i < current.size(); ++i) {
+					const auto &b = current[i];
+					if (b.device_id == delete_device_id && 
+						b.input_type == delete_input_type &&
+						((delete_input_type == JoypadInputType::Button && b.button == delete_button_input) ||
+						 (delete_input_type == JoypadInputType::Axis && b.axis_index == delete_axis_index))) {
+						config_->RemoveBinding(i);
+						RefreshBindings();
+						break;
+					}
 				}
-				config_->RemoveBinding((size_t)row_index);
-				RefreshBindings();
 			});
 	}
 }

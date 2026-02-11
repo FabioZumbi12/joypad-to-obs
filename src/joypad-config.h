@@ -1,6 +1,6 @@
 /*
 Joypad to OBS
-Copyright (C) <Year> <Developer> <Email Address>
+Copyright (C) 2026 FabioZumbi12 <admin@areaz12server.net.br>
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
