@@ -1227,9 +1227,15 @@ JoypadToolsDialog::JoypadToolsDialog(QWidget *parent,
 	auto *close_button =
 		new QPushButton(L("JoypadToOBS.Button.Close"), this);
 
+	QLabel *developerLabel = new QLabel(
+		"<a href=\"https://github.com/FabioZumbi12\" style=\"color: gray; text-decoration: none;\"><i>Developed by FabioZumbi12</i></a>",
+		this);
+	developerLabel->setOpenExternalLinks(true);
+
 	button_row->addWidget(add_button_);
 	button_row->addWidget(remove_button_);
 	button_row->addStretch();
+	button_row->addWidget(developerLabel);
 	button_row->addWidget(close_button);
 
 	layout->addLayout(button_row);
