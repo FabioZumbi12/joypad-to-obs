@@ -1,4 +1,4 @@
 #!/bin/sh
 
 # Garante que o script encontre o .run-format.zsh no mesmo diretório
-exec "$(dirname "$0")/.run-format.zsh" "$@"
+exec "$(dirname "$0")/.run-format.zsh" swift "$@"

@@ -204,7 +204,15 @@ invoke_formatter() {
 
 run_format() {
   if (( ! ${+SCRIPT_HOME} )) typeset -g SCRIPT_HOME=${ZSH_ARGZERO:A:h}
-  if (( ! ${+FORMATTER_NAME} )) typeset -g FORMATTER_NAME=${${(s:-:)ZSH_ARGZERO:t:r}[2]}
+  
+  # Accept formatter as first argument if explicitly provided
+  if [[ "${1}" == "clang" || "${1}" == "gersemi" || "${1}" == "swift" ]]; then
+    typeset -g FORMATTER_NAME="${1}"
+    shift
+  else
+    if (( ! ${+FORMATTER_NAME} )) typeset -g FORMATTER_NAME=${${(s:-:)ZSH_ARGZERO:t:r}[2]}
+  fi
+  
   local project_root=${SCRIPT_HOME:A:h}
 
   typeset -g host_os=${${(L)$(uname -s)}//darwin/macos}
