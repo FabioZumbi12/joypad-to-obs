@@ -623,6 +623,11 @@ public:
 
 	~JoypadBindingDialog() override
 	{
+		if (refresh_timer_) {
+			refresh_timer_->stop();
+			refresh_timer_->deleteLater();
+			refresh_timer_ = nullptr;
+		}
 		if (input_) {
 			input_->CancelLearn();
 			if (axis_handler_id_ > 0) {
