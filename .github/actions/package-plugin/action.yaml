@@ -69,7 +69,7 @@ runs:
 
         chmod +x .github/scripts/package-macos
 
-        .github/scripts/package-macos ${package_args}
+        .github/scripts/package-macos "${package_args[@]}"
 
     - name: Install Dependencies 🛍️
       if: runner.os == 'Linux'
@@ -92,13 +92,13 @@ runs:
           --target ubuntu-${{ inputs.target }}
           --config ${{ inputs.config }}
         )
-        if (( ${+RUNNER_DEBUG} )) build_args+=(--debug)
+        if (( ${+RUNNER_DEBUG} )) package_args+=(--debug)
 
         if [[ '${{ inputs.package }}' == 'true' ]] package_args+=(--package)
 
         chmod +x .github/scripts/package-ubuntu
 
-        .github/scripts/package-ubuntu ${package_args}
+        .github/scripts/package-ubuntu "${package_args[@]}"
 
     - name: Run Windows Packaging
       if: runner.os == 'Windows'
