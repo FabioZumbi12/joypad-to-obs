@@ -344,16 +344,20 @@ void JoypadActionEngine::Execute(const JoypadBinding &binding)
 		}
 		break;
 	case JoypadActionType::ToggleStudioMode:
-		QMetaObject::invokeMethod(QCoreApplication::instance(), []() {
-			obs_frontend_set_preview_program_mode(!obs_frontend_preview_program_mode_active());
-		});
+		if (QCoreApplication *app = QCoreApplication::instance()) {
+			QMetaObject::invokeMethod(app, []() {
+				obs_frontend_set_preview_program_mode(!obs_frontend_preview_program_mode_active());
+			});
+		}
 		break;
 	case JoypadActionType::TransitionToProgram:
-		QMetaObject::invokeMethod(QCoreApplication::instance(), []() {
-			if (obs_frontend_preview_program_mode_active()) {
-				obs_frontend_preview_program_trigger_transition();
-			}
-		});
+		if (QCoreApplication *app = QCoreApplication::instance()) {
+			QMetaObject::invokeMethod(app, []() {
+				if (obs_frontend_preview_program_mode_active()) {
+					obs_frontend_preview_program_trigger_transition();
+				}
+			});
+		}
 		break;
 	default:
 		break;

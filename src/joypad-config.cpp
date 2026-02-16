@@ -32,6 +32,8 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 
 namespace {
 const char *kConfigFileName = "joypad-to-obs.json";
+constexpr int kOsdPositionMin = (int)JoypadOsdPosition::TopLeft;
+constexpr int kOsdPositionMax = (int)JoypadOsdPosition::BottomRight;
 
 void profile_hotkey_callback(void *data, obs_hotkey_id id, obs_hotkey_t *hotkey, bool pressed)
 {
@@ -382,7 +384,11 @@ void JoypadConfigStore::Load()
 	osd_font_size_ = (int)obs_data_get_int(data, "osd_font_size");
 	if (osd_font_size_ <= 0)
 		osd_font_size_ = 24;
-	osd_position_ = (JoypadOsdPosition)obs_data_get_int(data, "osd_position");
+	int osd_position = (int)obs_data_get_int(data, "osd_position");
+	if (osd_position < kOsdPositionMin || osd_position > kOsdPositionMax) {
+		osd_position = (int)JoypadOsdPosition::BottomCenter;
+	}
+	osd_position_ = (JoypadOsdPosition)osd_position;
 	const char *bg_color = obs_data_get_string(data, "osd_background_color");
 	osd_background_color_ = (bg_color && *bg_color) ? bg_color : "rgba(0, 0, 0, 230)";
 
@@ -509,9 +515,9 @@ void JoypadConfigStore::Save()
 
 	obs_data_set_bool(data, "osd_enabled", osd_enabled_);
 	obs_data_set_string(data, "osd_color", osd_color_.c_str());
+	obs_data_set_string(data, "osd_background_color", osd_background_color_.c_str());
 	obs_data_set_int(data, "osd_font_size", osd_font_size_);
 	obs_data_set_int(data, "osd_position", (int)osd_position_);
-	obs_data_set_string(data, "osd_background_color", osd_background_color_.c_str());
 
 	if (!obs_data_save_json(data, config_path)) {
 		obs_log(LOG_WARNING, "Nao foi possivel salvar %s", config_path);
@@ -717,7 +723,22 @@ void JoypadConfigStore::SetOsdColor(const std::string &color)
 {
 	{
 		std::lock_guard<std::mutex> lock(mutex_);
-		osd_color_ = color;
+		osd_color_ = color.empty() ? "#ffffff" : color;
+	}
+	dirty_ = true;
+}
+
+std::string JoypadConfigStore::GetOsdBackgroundColor() const
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	return osd_background_color_;
+}
+
+void JoypadConfigStore::SetOsdBackgroundColor(const std::string &color)
+{
+	{
+		std::lock_guard<std::mutex> lock(mutex_);
+		osd_background_color_ = color.empty() ? "rgba(0, 0, 0, 230)" : color;
 	}
 	dirty_ = true;
 }
@@ -733,21 +754,6 @@ void JoypadConfigStore::SetOsdFontSize(int size)
 	{
 		std::lock_guard<std::mutex> lock(mutex_);
 		osd_font_size_ = size;
-	}
-	dirty_ = true;
-}
-
-std::string JoypadConfigStore::GetOsdBackgroundColor() const
-{
-	std::lock_guard<std::mutex> lock(mutex_);
-	return osd_background_color_;
-}
-
-void JoypadConfigStore::SetOsdBackgroundColor(const std::string &color)
-{
-	{
-		std::lock_guard<std::mutex> lock(mutex_);
-		osd_background_color_ = color;
 	}
 	dirty_ = true;
 }

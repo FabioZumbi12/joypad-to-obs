@@ -84,6 +84,11 @@ void JoypadInputManager::Stop()
 		hid_manager_ = nullptr;
 		hid_run_loop_ = nullptr;
 	}
+	{
+		std::lock_guard<std::mutex> lock(devices_mutex_);
+		devices_.clear();
+		device_states_.clear();
+	}
 #elif defined(__linux__)
 	{
 		std::lock_guard<std::mutex> lock(devices_mutex_);
@@ -754,19 +759,85 @@ void JoypadInputManager::PollLoop()
 						if (product && CFGetTypeID(product) == CFNumberGetTypeID()) {
 							CFNumberGetValue((CFNumberRef)product, kCFNumberIntType, &pid);
 						}
+						std::string device_id =
+							"hid:" + std::to_string(vid) + ":" + std::to_string(pid);
 
 						std::lock_guard<std::mutex> lock(self->devices_mutex_);
-						JoypadDeviceInfo info;
-						info.name = name;
-						info.id = "hid:" + std::to_string(vid) + ":" + std::to_string(pid);
-						self->devices_.push_back(info);
+						for (auto &state : self->device_states_) {
+							if (state.hid_device == device) {
+								state.connected = true;
+								state.name = name;
+								state.id = device_id;
+								return;
+							}
+						}
+
+						bool known_device = false;
+						for (auto &info : self->devices_) {
+							if (info.id == device_id) {
+								info.name = name;
+								known_device = true;
+								break;
+							}
+						}
+						if (!known_device) {
+							JoypadDeviceInfo info;
+							info.name = name;
+							info.id = device_id;
+							self->devices_.push_back(info);
+						}
 
 						DeviceState state;
-						state.id = info.id;
-						state.name = info.name;
+						state.id = device_id;
+						state.name = name;
 						state.hid_device = device;
 						state.connected = true;
 						self->device_states_.push_back(state);
+					},
+					this);
+				IOHIDManagerRegisterDeviceRemovalCallback(
+					(IOHIDManagerRef)hid_manager_,
+					[](void *context, IOReturn, void *, IOHIDDeviceRef device) {
+						auto *self = static_cast<JoypadInputManager *>(context);
+						if (!self || !device) {
+							return;
+						}
+						std::lock_guard<std::mutex> lock(self->devices_mutex_);
+						std::string removed_id;
+						for (const auto &state : self->device_states_) {
+							if (state.hid_device == device) {
+								removed_id = state.id;
+								break;
+							}
+						}
+						self->device_states_.erase(
+							std::remove_if(self->device_states_.begin(),
+								       self->device_states_.end(),
+								       [device](const DeviceState &state) {
+									       return state.hid_device == device;
+								       }),
+							self->device_states_.end());
+
+						if (!removed_id.empty()) {
+							bool still_present = false;
+							for (const auto &state : self->device_states_) {
+								if (state.id == removed_id) {
+									still_present = true;
+									break;
+								}
+							}
+							if (!still_present) {
+								self->devices_.erase(
+									std::remove_if(
+										self->devices_.begin(),
+										self->devices_.end(),
+										[&removed_id](
+											const JoypadDeviceInfo &info) {
+											return info.id == removed_id;
+										}),
+									self->devices_.end());
+							}
+						}
 					},
 					this);
 

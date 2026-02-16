@@ -34,8 +34,9 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <QCoreApplication>
 #include <QLabel>
 #include <QTimer>
-#include <QGraphicsOpacityEffect>
 #include <QPropertyAnimation>
+#include <QSequentialAnimationGroup>
+#include <QColor>
 
 OBS_DECLARE_MODULE()
 OBS_MODULE_USE_DEFAULT_LOCALE(PLUGIN_NAME, "en-US")
@@ -77,6 +78,31 @@ double MapRawToPercentWithGamma(const JoypadBinding &binding, double raw)
 	gamma = std::clamp(gamma, 0.1, 50.0);
 	double curved = std::pow(base, gamma);
 	return std::clamp(curved * 100.0, 0.0, 100.0);
+}
+
+QString BuildOsdStyle(const QString &text_color, const QString &background_color, int font_size)
+{
+	return QString("QLabel { background-color: %1; color: %2; border-radius: 0px; padding: 8px; "
+		       "font-size: %3px; font-weight: bold; border: 2px solid %2; }")
+		.arg(background_color)
+		.arg(text_color)
+		.arg(font_size);
+}
+
+QString ToCssColor(const QString &input, const QString &fallback)
+{
+	QColor parsed(input);
+	if (!parsed.isValid()) {
+		parsed = QColor(fallback);
+	}
+	if (!parsed.isValid()) {
+		parsed = QColor("#000000");
+	}
+	return QString("rgba(%1, %2, %3, %4)")
+		.arg(parsed.red())
+		.arg(parsed.green())
+		.arg(parsed.blue())
+		.arg(parsed.alpha());
 }
 
 void ApplyStoredAxisValues()
@@ -128,24 +154,25 @@ bool obs_module_load(void)
 		if (!g_config.GetOsdEnabled())
 			return;
 
-		QMetaObject::invokeMethod(QCoreApplication::instance(), [name]() {
+		QCoreApplication *app = QCoreApplication::instance();
+		if (!app) {
+			return;
+		}
+		QMetaObject::invokeMethod(app, [name]() {
 			QWidget *main_window = (QWidget *)obs_frontend_get_main_window();
 			if (!main_window)
 				return;
 
 			QLabel *label = new QLabel(main_window);
 			label->setWindowFlags(Qt::ToolTip | Qt::FramelessWindowHint);
-			label->setAttribute(Qt::WA_TranslucentBackground);
 			label->setAttribute(Qt::WA_ShowWithoutActivating);
-			QString color = QString::fromStdString(g_config.GetOsdColor());
+			label->setAttribute(Qt::WA_StyledBackground, true);
+			label->setAutoFillBackground(true);
+			QString color = ToCssColor(QString::fromStdString(g_config.GetOsdColor()), "#ffffff");
+			QString background_color = ToCssColor(QString::fromStdString(g_config.GetOsdBackgroundColor()),
+							      "rgba(0, 0, 0, 230)");
 			int size = g_config.GetOsdFontSize();
-			QString bg_color = QString::fromStdString(g_config.GetOsdBackgroundColor());
-			label->setStyleSheet(QString("QLabel { background-color: %3; color: %1; "
-						     "border-radius: 8px; padding: 12px; font-size: %2px; "
-						     "font-weight: bold; border: 2px solid %1; }")
-						     .arg(color)
-						     .arg(size)
-						     .arg(bg_color));
+			label->setStyleSheet(BuildOsdStyle(color, background_color, size));
 			label->setText(QString("Joypad Profile: %1").arg(QString::fromStdString(name)));
 			label->adjustSize();
 
@@ -195,19 +222,27 @@ bool obs_module_load(void)
 				break;
 			}
 			label->move(x, y);
+			label->setWindowOpacity(0.0);
 			label->show();
 
-			QTimer::singleShot(2000, label, [label]() {
-				QGraphicsOpacityEffect *eff = new QGraphicsOpacityEffect(label);
-				label->setGraphicsEffect(eff);
-				QPropertyAnimation *a = new QPropertyAnimation(eff, "opacity");
-				a->setDuration(500);
-				a->setStartValue(1);
-				a->setEndValue(0);
-				a->setEasingCurve(QEasingCurve::OutQuad);
-				QObject::connect(a, &QPropertyAnimation::finished, label, &QLabel::deleteLater);
-				a->start(QAbstractAnimation::DeleteWhenStopped);
-			});
+			auto *fade_in = new QPropertyAnimation(label, "windowOpacity");
+			fade_in->setDuration(180);
+			fade_in->setStartValue(0.0);
+			fade_in->setEndValue(1.0);
+			fade_in->setEasingCurve(QEasingCurve::InOutQuad);
+
+			auto *fade_out = new QPropertyAnimation(label, "windowOpacity");
+			fade_out->setDuration(600);
+			fade_out->setStartValue(1.0);
+			fade_out->setEndValue(0.0);
+			fade_out->setEasingCurve(QEasingCurve::OutCubic);
+
+			auto *anim_group = new QSequentialAnimationGroup(label);
+			anim_group->addAnimation(fade_in);
+			anim_group->addPause(1700);
+			anim_group->addAnimation(fade_out);
+			QObject::connect(anim_group, &QSequentialAnimationGroup::finished, label, &QLabel::deleteLater);
+			anim_group->start(QAbstractAnimation::DeleteWhenStopped);
 		});
 	});
 

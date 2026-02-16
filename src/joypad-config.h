@@ -19,6 +19,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #pragma once
 
 #include <mutex>
+#include <atomic>
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -159,18 +160,18 @@ public:
 	void SetOsdEnabled(bool enabled);
 	std::string GetOsdColor() const;
 	void SetOsdColor(const std::string &color);
+	std::string GetOsdBackgroundColor() const;
+	void SetOsdBackgroundColor(const std::string &color);
 	int GetOsdFontSize() const;
 	void SetOsdFontSize(int size);
 	JoypadOsdPosition GetOsdPosition() const;
 	void SetOsdPosition(JoypadOsdPosition position);
-	std::string GetOsdBackgroundColor() const;
-	void SetOsdBackgroundColor(const std::string &color);
 
 private:
 	std::vector<JoypadProfile> profiles_;
 	int current_profile_index_ = 0;
 	mutable std::mutex mutex_;
-	bool dirty_ = false;
+	std::atomic<bool> dirty_{false};
 	mutable std::unordered_map<std::string, bool> axis_active_;
 	std::unordered_map<std::string, double> axis_last_raw_;
 	std::string last_file_path_;

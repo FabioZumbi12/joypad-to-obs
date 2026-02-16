@@ -43,14 +43,11 @@ protected:
 	void closeEvent(QCloseEvent *event) override;
 
 private:
-	int SelectedRow() const;
-
 	JoypadConfigStore *config_ = nullptr;
 	JoypadInputManager *input_ = nullptr;
 
 	QTableWidget *table_ = nullptr;
 	QPushButton *add_button_ = nullptr;
-	QPushButton *remove_button_ = nullptr;
 	QPushButton *clear_button_ = nullptr;
 	QPushButton *save_button_ = nullptr;
 	QLabel *axis_live_label_ = nullptr;

@@ -1385,7 +1385,6 @@ JoypadToolsDialog::JoypadToolsDialog(QWidget *parent, JoypadConfigStore *config,
 
 	auto *button_row = new QHBoxLayout();
 	add_button_ = new QPushButton(L("JoypadToOBS.Button.AddCommand"), this);
-	remove_button_ = new QPushButton(L("JoypadToOBS.Button.Remove"), this);
 	clear_button_ = new QPushButton(L("JoypadToOBS.Button.ClearAll"), this);
 	auto *osd_button = new QPushButton(L("JoypadToOBS.Button.OSDSettings"), this);
 	save_button_ = new QPushButton(L("JoypadToOBS.Button.Save"), this);
@@ -1398,7 +1397,6 @@ JoypadToolsDialog::JoypadToolsDialog(QWidget *parent, JoypadConfigStore *config,
 	developerLabel->setOpenExternalLinks(true);
 
 	button_row->addWidget(add_button_);
-	button_row->addWidget(remove_button_);
 	button_row->addWidget(clear_button_);
 	button_row->addWidget(osd_button);
 	button_row->addStretch();
@@ -1416,14 +1414,6 @@ JoypadToolsDialog::JoypadToolsDialog(QWidget *parent, JoypadConfigStore *config,
 		}
 	});
 
-	connect(remove_button_, &QPushButton::clicked, this, [this]() {
-		int row = SelectedRow();
-		if (row >= 0) {
-			config_->RemoveBinding((size_t)row);
-			RefreshBindings();
-		}
-	});
-
 	connect(clear_button_, &QPushButton::clicked, this, [this]() {
 		if (QMessageBox::question(this, L("JoypadToOBS.Dialog.ClearAllTitle"),
 					  L("JoypadToOBS.Dialog.ClearAllConfirm")) == QMessageBox::Yes) {
@@ -1433,35 +1423,41 @@ JoypadToolsDialog::JoypadToolsDialog(QWidget *parent, JoypadConfigStore *config,
 	});
 
 	connect(osd_button, &QPushButton::clicked, this, [this]() {
-		QDialog dlg(this);
-		dlg.setWindowTitle(L("JoypadToOBS.Dialog.OSDSettings"));
-		auto *layout = new QVBoxLayout(&dlg);
+		QDialog osd_dlg(this);
 
-		auto *chk = new QCheckBox(L("JoypadToOBS.Settings.EnableOSD"), &dlg);
+		osd_dlg.setWindowTitle(L("JoypadToOBS.Dialog.OSDSettings"));
+		auto *layout = new QVBoxLayout(&osd_dlg);
+
+		auto *chk = new QCheckBox(L("JoypadToOBS.Settings.EnableOSD"), &osd_dlg);
 		chk->setChecked(config_->GetOsdEnabled());
 		layout->addWidget(chk);
 
 		auto *grid = new QGridLayout();
-		grid->addWidget(new QLabel(L("JoypadToOBS.Settings.OSDColor"), &dlg), 0, 0);
-
-		auto *color_btn = new QPushButton(&dlg);
 		QString currentColor = QString::fromStdString(config_->GetOsdColor());
-		color_btn->setStyleSheet(QString("background-color: %1; border: 1px solid #555;").arg(currentColor));
+		QString currentBgColor = QString::fromStdString(config_->GetOsdBackgroundColor());
+
+		auto *color_label = new QLabel(L("JoypadToOBS.Settings.OSDColor"), &osd_dlg);
+		auto *color_btn = new QPushButton(&osd_dlg);
+		color_btn->setMinimumWidth(140);
+		grid->addWidget(color_label, 0, 0);
 		grid->addWidget(color_btn, 0, 1);
 
-		auto *bg_color_btn = new QPushButton(&dlg);
-		QString currentBgColor = QString::fromStdString(config_->GetOsdBackgroundColor());
-		bg_color_btn->setStyleSheet(
-			QString("background-color: %1; border: 1px solid #555;").arg(currentBgColor));
+		auto *bg_color_label = new QLabel(L("JoypadToOBS.Settings.OSDBgColor"), &osd_dlg);
+		auto *bg_color_btn = new QPushButton(&osd_dlg);
+		bg_color_btn->setMinimumWidth(140);
+		grid->addWidget(bg_color_label, 1, 0);
 		grid->addWidget(bg_color_btn, 1, 1);
-		grid->addWidget(new QLabel(L("JoypadToOBS.Settings.OSDBgColor"), &dlg), 1, 0);
-		auto *spin = new QSpinBox(&dlg);
+
+		QLabel *size_label = new QLabel(L("JoypadToOBS.Settings.OSDSize"), &osd_dlg);
+		grid->addWidget(size_label, 2, 0);
+		auto *spin = new QSpinBox(&osd_dlg);
 		spin->setRange(8, 100);
 		spin->setValue(config_->GetOsdFontSize());
-		grid->addWidget(spin, 1, 1);
+		grid->addWidget(spin, 2, 1);
 
-		grid->addWidget(new QLabel(L("JoypadToOBS.Settings.OSDPosition"), &dlg), 2, 0);
-		auto *pos_combo = new QComboBox(&dlg);
+		QLabel *pos_label = new QLabel(L("JoypadToOBS.Settings.OSDPosition"), &osd_dlg);
+		grid->addWidget(pos_label, 3, 0);
+		auto *pos_combo = new QComboBox(&osd_dlg);
 		pos_combo->addItem(L("JoypadToOBS.Position.TopLeft"), (int)JoypadOsdPosition::TopLeft);
 		pos_combo->addItem(L("JoypadToOBS.Position.TopCenter"), (int)JoypadOsdPosition::TopCenter);
 		pos_combo->addItem(L("JoypadToOBS.Position.TopRight"), (int)JoypadOsdPosition::TopRight);
@@ -1471,43 +1467,90 @@ JoypadToolsDialog::JoypadToolsDialog(QWidget *parent, JoypadConfigStore *config,
 		pos_combo->addItem(L("JoypadToOBS.Position.BottomLeft"), (int)JoypadOsdPosition::BottomLeft);
 		pos_combo->addItem(L("JoypadToOBS.Position.BottomCenter"), (int)JoypadOsdPosition::BottomCenter);
 		pos_combo->addItem(L("JoypadToOBS.Position.BottomRight"), (int)JoypadOsdPosition::BottomRight);
-
 		pos_combo->setCurrentIndex(pos_combo->findData((int)config_->GetOsdPosition()));
-		grid->addWidget(pos_combo, 2, 1);
-
+		grid->addWidget(pos_combo, 3, 1);
 		layout->addLayout(grid);
 
-		auto *bbox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+		auto *preview = new QLabel(L("JoypadToOBS.Settings.OSDPreviewText"), &osd_dlg);
+		preview->setAlignment(Qt::AlignCenter);
+		preview->setMinimumHeight(48);
+		layout->addWidget(preview);
+
+		auto update_color_button = [](QPushButton *button, const QString &color) {
+			button->setText(color);
+			button->setStyleSheet(QString("QPushButton { background-color: %1; border: 1px solid #555; "
+						      "padding: 4px 8px; }")
+						      .arg(color));
+		};
+		auto update_preview = [preview, &currentColor, &currentBgColor, spin]() {
+			preview->setStyleSheet(QString("QLabel { background-color: %1; color: %2; border-radius: 6px; "
+						       "padding: 8px; font-weight: bold; font-size: %3px; }")
+						       .arg(currentBgColor)
+						       .arg(currentColor)
+						       .arg(spin->value()));
+		};
+		update_color_button(color_btn, currentColor);
+		update_color_button(bg_color_btn, currentBgColor);
+		update_preview();
+
+		auto *bbox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &osd_dlg);
+		auto *reset_button =
+			bbox->addButton(L("JoypadToOBS.Button.ResetOSDDefaults"), QDialogButtonBox::ResetRole);
 		layout->addWidget(bbox);
 
-		connect(bbox, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
-		connect(bbox, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
-
-		QString selectedBgColor = currentBgColor;
-		QString selectedColor = currentColor;
-
+		connect(bbox, &QDialogButtonBox::accepted, &osd_dlg, &QDialog::accept);
+		connect(bbox, &QDialogButtonBox::rejected, &osd_dlg, &QDialog::reject);
 		connect(color_btn, &QPushButton::clicked, [&]() {
-			QColor c = QColorDialog::getColor(QColor(selectedColor), &dlg);
+			QColor c = QColorDialog::getColor(QColor(currentColor), &osd_dlg,
+							  L("JoypadToOBS.Settings.SelectColor"));
 			if (c.isValid()) {
-				selectedColor = c.name();
-				color_btn->setStyleSheet(
-					QString("background-color: %1; border: 1px solid #555;").arg(selectedColor));
+				currentColor = c.name();
+				update_color_button(color_btn, currentColor);
+				update_preview();
 			}
 		});
 		connect(bg_color_btn, &QPushButton::clicked, [&]() {
-			QColor c = QColorDialog::getColor(QColor(selectedBgColor), &dlg);
+			QColor c = QColorDialog::getColor(QColor(currentBgColor), &osd_dlg,
+							  L("JoypadToOBS.Settings.SelectColor"));
 			if (c.isValid()) {
-				selectedBgColor = c.name();
-				bg_color_btn->setStyleSheet(
-					QString("background-color: %1; border: 1px solid #555;").arg(selectedColor));
+				currentBgColor = c.name(QColor::HexArgb);
+				update_color_button(bg_color_btn, currentBgColor);
+				update_preview();
 			}
 		});
+		connect(spin, QOverload<int>::of(&QSpinBox::valueChanged), &osd_dlg,
+			[update_preview](int) { update_preview(); });
+		connect(reset_button, &QPushButton::clicked, &osd_dlg, [=, &currentColor, &currentBgColor]() {
+			chk->setChecked(true);
+			currentColor = "#ffffff";
+			currentBgColor = "#000000";
+			spin->setValue(24);
+			const int bottom_center_idx = pos_combo->findData((int)JoypadOsdPosition::BottomCenter);
+			pos_combo->setCurrentIndex(bottom_center_idx >= 0 ? bottom_center_idx : 0);
+			update_color_button(color_btn, currentColor);
+			update_color_button(bg_color_btn, currentBgColor);
+			update_preview();
+		});
+		auto update_enabled_state = [=](bool enabled) {
+			color_label->setEnabled(enabled);
+			color_btn->setEnabled(enabled);
+			bg_color_label->setEnabled(enabled);
+			bg_color_btn->setEnabled(enabled);
+			size_label->setEnabled(enabled);
+			spin->setEnabled(enabled);
+			pos_label->setEnabled(enabled);
+			pos_combo->setEnabled(enabled);
+			preview->setEnabled(enabled);
+		};
+		connect(chk, &QCheckBox::toggled, &osd_dlg, update_enabled_state);
+		update_enabled_state(chk->isChecked());
 
-		if (dlg.exec() == QDialog::Accepted) {
+		if (osd_dlg.exec() == QDialog::Accepted) {
 			config_->SetOsdEnabled(chk->isChecked());
-			config_->SetOsdColor(selectedColor.toStdString());
+			config_->SetOsdColor(currentColor.toStdString());
+			config_->SetOsdBackgroundColor(currentBgColor.toStdString());
+			config_->SetOsdFontSize(spin->value());
 			config_->SetOsdPosition((JoypadOsdPosition)pos_combo->currentData().toInt());
-			config_->SetOsdBackgroundColor(selectedBgColor.toStdString());
 		}
 	});
 
@@ -1518,8 +1561,10 @@ JoypadToolsDialog::JoypadToolsDialog(QWidget *parent, JoypadConfigStore *config,
 	update_timer_ = new QTimer(this);
 	connect(update_timer_, &QTimer::timeout, this, [this]() {
 		int actual = config_->GetCurrentProfileIndex();
+
 		if (profile_combo_->currentIndex() != actual) {
 			profile_combo_->blockSignals(true);
+
 			if (actual >= 0 && actual < profile_combo_->count()) {
 				profile_combo_->setCurrentIndex(actual);
 				profile_comment_->blockSignals(true);
@@ -1528,6 +1573,7 @@ JoypadToolsDialog::JoypadToolsDialog(QWidget *parent, JoypadConfigStore *config,
 				profile_comment_->blockSignals(false);
 				RefreshBindings();
 			}
+
 			profile_combo_->blockSignals(false);
 		}
 		save_button_->setEnabled(config_->HasUnsavedChanges());
@@ -1709,18 +1755,4 @@ void JoypadToolsDialog::RefreshBindings()
 		});
 	}
 	table_->resizeColumnsToContents();
-}
-
-int JoypadToolsDialog::SelectedRow() const
-{
-	auto selection = table_->selectionModel();
-	if (!selection) {
-		return -1;
-	}
-
-	auto rows = selection->selectedRows();
-	if (rows.isEmpty()) {
-		return -1;
-	}
-	return rows.first().row();
 }
