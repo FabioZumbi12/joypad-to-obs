@@ -20,6 +20,7 @@ This plugin **does not** provide a visual overlay for your controller. Its purpo
     *   **Custom Hardware:** Compatible with **Arduino-based devices** that appear as a standard joystick, allowing you to use potentiometers, encoders, and sliders to control OBS.
 *   **Intuitive UI:** A dedicated "Tools" menu dialog to create, edit, and manage all your bindings.
 *   **"Learn" Mode:** Simply press a button or move an axis on your controller to assign it to an action.
+*   **Advanced Axis Configuration:** Calibrate axis range (Min/Max), set deadzones (Threshold), and invert axis direction for precise control.
 
 ## Supported Actions
 
@@ -47,6 +48,27 @@ Joypad to OBS supports a comprehensive set of commands to manage your stream:
 *   **Streaming & Recording:** Start or stop **Streaming** and **Recording**.
 *   **Virtual Camera:** Toggle the **Virtual Camera**.
 
+## Profile Management
+
+Joypad to OBS allows you to create and manage multiple profiles, each with its own set of bindings. This is useful for different games, scenes, or streaming setups.
+
+*   **Create:** Click the **+** button to create a new blank profile.
+*   **Rename:** Click the **✎** button to rename the current profile.
+*   **Duplicate:** Click the **❐** button to create a copy of the current profile.
+*   **Remove:** Click the **-** button to delete the current profile.
+*   **Import/Export:** Use the **Import** and **Export** buttons to share profiles or back them up as JSON files.
+
+## Hotkeys
+
+When you create a profile, the plugin automatically registers a corresponding **OBS Hotkey**. This allows you to switch between profiles using your keyboard or another device (like a Stream Deck).
+
+1.  Go to **File** -> **Settings** -> **Hotkeys** in OBS.
+2.  Search for "Joypad to OBS".
+3.  You will see entries like `Joypad to OBS: Switch to profile 'MyProfile'`.
+4.  Assign any key combination you like.
+
+When triggered, the plugin will instantly load the bindings for that profile.
+
 ## Requirements
 
 *   **OBS Studio:** Version 28 or newer.
@@ -59,13 +81,14 @@ Joypad to OBS supports a comprehensive set of commands to manage your stream:
     *   **macOS:** `~/Library/Application Support/obs-studio/plugins/`
     *   **Linux:** `~/.config/obs-studio/plugins/`
 2.  **Open the configuration window:** In OBS, go to the **Tools** menu and select **Settings for Joypad to OBS**.
-3.  **Add a new binding:**
+3.  **Select a Profile:** Choose the profile you want to edit from the dropdown menu, or create a new one.
+4.  **Add a new binding:**
     *   Click the **"Add Command"** button.
     *   Click **"Listen"** and press the button or move the axis on your controller that you want to use.
     *   Select the **Action** you want to perform (e.g., "Switch Scene", "Set Source Mute").
     *   Configure the target (e.g., choose the specific scene or source).
     *   Click **OK** to save the binding.
-4.  Your controller is now ready to control OBS!
+5.  Your controller is now ready to control OBS!
 
 ## Building from Source
 

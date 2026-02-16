@@ -30,6 +30,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <QMetaObject>
 
 OBS_DECLARE_MODULE()
 OBS_MODULE_USE_DEFAULT_LOCALE(PLUGIN_NAME, "en-US")
@@ -102,6 +103,19 @@ void StoreAxisLastRawOnShutdown()
 {
 	// Values are now updated in real-time in OnAxisChanged
 }
+
+static void save_hotkeys(obs_data_t *save_data, bool saving, void *private_data)
+{
+	(void)save_data;
+	(void)saving;
+	(void)private_data;
+	g_config.Save();
+	if (g_dialog) {
+		QMetaObject::invokeMethod(g_dialog, []() {
+			g_dialog->RefreshProfiles();
+		}, Qt::QueuedConnection);
+	}
+}
 } // namespace
 
 bool obs_module_load(void)
@@ -139,6 +153,8 @@ bool obs_module_load(void)
 	ApplyStoredAxisValues();
 	g_input.Start();
 
+	obs_frontend_add_save_callback(save_hotkeys, nullptr);
+
 	g_tools_action = reinterpret_cast<QAction *>(
 		obs_frontend_add_tools_menu_qaction(
 			obs_module_text("JoypadToOBS.MenuTitle")));
@@ -159,8 +175,9 @@ bool obs_module_load(void)
 
 void obs_module_unload(void)
 {
+	obs_frontend_remove_save_callback(save_hotkeys, nullptr);
 	StoreAxisLastRawOnShutdown();
-	g_config.Save();
+	g_config.Unload();
 	g_input.Stop();
 
 	if (g_dialog) {

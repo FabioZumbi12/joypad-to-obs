@@ -45,6 +45,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <QSlider>
 #include <QSizePolicy>
 #include <QTimer>
+#include <QStyle>
 
 #include <algorithm>
 #include <cmath>
@@ -663,7 +664,6 @@ public:
 	{
 		if (refresh_timer_) {
 			refresh_timer_->stop();
-			refresh_timer_->deleteLater();
 			refresh_timer_ = nullptr;
 		}
 		if (input_) {
@@ -1302,12 +1302,21 @@ JoypadToolsDialog::JoypadToolsDialog(QWidget *parent,
 			}
 			config_->AddProfile(trimmed.toStdString());
 			RefreshProfiles();
+			QMessageBox msg(this);
+			msg.setWindowTitle(L("JoypadToOBS.Profile.Add"));
+			msg.setText(L("JoypadToOBS.Profile.HotkeyCreated"));
+			msg.setIconPixmap(style()->standardIcon(QStyle::SP_DialogApplyButton).pixmap(32, 32));
+			msg.setStandardButtons(QMessageBox::Ok);
+			msg.exec();
 		}
 	});
 
 	connect(rename_profile_btn, &QToolButton::clicked, this, [this]() {
 		int idx = config_->GetCurrentProfileIndex();
-		QString currentName = profile_combo_->currentText();
+		auto names = config_->GetProfileNames();
+		if (idx < 0 || idx >= (int)names.size())
+			return;
+		QString currentName = QString::fromStdString(names[idx]);
 		bool ok;
 		QString text = QInputDialog::getText(
 			this, L("JoypadToOBS.Profile.Rename"),
@@ -1320,7 +1329,6 @@ JoypadToolsDialog::JoypadToolsDialog(QWidget *parent,
 				return;
 			}
 			if (trimmed != currentName) {
-				auto names = config_->GetProfileNames();
 				for (size_t i = 0; i < names.size(); ++i) {
 					if ((int)i == idx)
 						continue;
@@ -1337,7 +1345,10 @@ JoypadToolsDialog::JoypadToolsDialog(QWidget *parent,
 
 	connect(duplicate_profile_btn, &QToolButton::clicked, this, [this]() {
 		int idx = config_->GetCurrentProfileIndex();
-		QString currentName = profile_combo_->currentText();
+		auto names = config_->GetProfileNames();
+		if (idx < 0 || idx >= (int)names.size())
+			return;
+		QString currentName = QString::fromStdString(names[idx]);
 		bool ok;
 		QString text = QInputDialog::getText(
 			this, L("JoypadToOBS.Profile.Duplicate"),
@@ -1349,7 +1360,6 @@ JoypadToolsDialog::JoypadToolsDialog(QWidget *parent,
 				QMessageBox::warning(this, L("JoypadToOBS.Profile.Duplicate"), L("JoypadToOBS.Profile.EmptyName"));
 				return;
 			}
-			auto names = config_->GetProfileNames();
 			for (const auto &name : names) {
 				if (QString::fromStdString(name).compare(trimmed, Qt::CaseInsensitive) == 0) {
 					QMessageBox::warning(this, L("JoypadToOBS.Profile.Duplicate"), L("JoypadToOBS.Profile.NameExists"));
@@ -1358,6 +1368,12 @@ JoypadToolsDialog::JoypadToolsDialog(QWidget *parent,
 			}
 			config_->DuplicateProfile(idx, trimmed.toStdString());
 			RefreshProfiles();
+			QMessageBox msg(this);
+			msg.setWindowTitle(L("JoypadToOBS.Profile.Duplicate"));
+			msg.setText(L("JoypadToOBS.Profile.HotkeyCreated"));
+			msg.setIconPixmap(style()->standardIcon(QStyle::SP_DialogApplyButton).pixmap(32, 32));
+			msg.setStandardButtons(QMessageBox::Ok);
+			msg.exec();
 		}
 	});
 
@@ -1371,7 +1387,11 @@ JoypadToolsDialog::JoypadToolsDialog(QWidget *parent,
 	});
 
 	connect(export_profile_btn, &QPushButton::clicked, this, [this]() {
-		QString path = QFileDialog::getSaveFileName(this, L("JoypadToOBS.Profile.Export"), "", "JSON Files (*.json)");
+		int idx = config_->GetCurrentProfileIndex();
+		auto names = config_->GetProfileNames();
+		if (idx < 0 || idx >= (int)names.size()) return;
+		QString defaultName = QString::fromStdString(names[idx]) + ".json";
+		QString path = QFileDialog::getSaveFileName(this, L("JoypadToOBS.Profile.Export"), defaultName, "JSON Files (*.json)");
 		if (!path.isEmpty()) {
 			config_->ExportProfile(config_->GetCurrentProfileIndex(), path.toStdString());
 		}
@@ -1456,6 +1476,20 @@ JoypadToolsDialog::JoypadToolsDialog(QWidget *parent,
 
 	connect(close_button, &QPushButton::clicked, this, &QDialog::close);
 
+	update_timer_ = new QTimer(this);
+	connect(update_timer_, &QTimer::timeout, this, [this]() {
+		int actual = config_->GetCurrentProfileIndex();
+		if (profile_combo_->currentIndex() != actual) {
+			profile_combo_->blockSignals(true);
+			if (actual >= 0 && actual < profile_combo_->count()) {
+				profile_combo_->setCurrentIndex(actual);
+				RefreshBindings();
+			}
+			profile_combo_->blockSignals(false);
+		}
+	});
+	update_timer_->start(200);
+
 	RefreshProfiles();
 	table_->resizeColumnsToContents();
 }
@@ -1469,8 +1503,13 @@ void JoypadToolsDialog::RefreshProfiles()
 	profile_combo_->blockSignals(true);
 	profile_combo_->clear();
 	auto names = config_->GetProfileNames();
-	for (const auto &name : names) {
-		profile_combo_->addItem(QString::fromStdString(name));
+	for (size_t i = 0; i < names.size(); ++i) {
+		std::string hotkey = config_->GetProfileHotkeyString((int)i);
+		QString display = QString::fromStdString(names[i]);
+		if (!hotkey.empty()) {
+			display += QString(" [%1]").arg(QString::fromStdString(hotkey));
+		}
+		profile_combo_->addItem(display);
 	}
 	int current = config_->GetCurrentProfileIndex();
 	if (current >= 0 && current < profile_combo_->count()) {

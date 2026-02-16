@@ -22,6 +22,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <obs.h>
 
 enum class JoypadActionType {
 	SwitchScene = 0,
@@ -97,12 +98,14 @@ struct JoypadEvent {
 struct JoypadProfile {
 	std::string name;
 	std::vector<JoypadBinding> bindings;
+	obs_hotkey_id hotkey_id = OBS_INVALID_HOTKEY_ID;
 };
 
 class JoypadConfigStore {
 public:
 	void Load();
 	void Save();
+	void Unload();
 
 	void AddBinding(const JoypadBinding &binding);
 	void RemoveBinding(size_t index);
@@ -114,6 +117,7 @@ public:
 	void SetAxisLastRaw(const std::string &key, double raw);
 	bool ConsumeAxisLastRaw(const std::string &key, double &raw_out);
 	void ClearAxisLastRaw();
+	void SwitchProfileByHotkey(obs_hotkey_id id);
 
 	// Profile Management
 	std::vector<std::string> GetProfileNames() const;
@@ -125,6 +129,7 @@ public:
 	void DuplicateProfile(int index, const std::string &new_name);
 	bool ExportProfile(int index, const std::string &filepath);
 	bool ImportProfile(const std::string &filepath);
+	std::string GetProfileHotkeyString(int index) const;
 
 private:
 	std::vector<JoypadProfile> profiles_;
@@ -132,4 +137,5 @@ private:
 	mutable std::mutex mutex_;
 	mutable std::unordered_map<std::string, bool> axis_active_;
 	std::unordered_map<std::string, double> axis_last_raw_;
+	void SortAndRegisterHotkeys(std::unique_lock<std::mutex> &lock);
 };

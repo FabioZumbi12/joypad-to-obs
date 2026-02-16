@@ -25,10 +25,52 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <util/platform.h>
 #include <fstream>
 #include <cctype>
+#include <obs-frontend-api.h>
+#include <map>
+#include <util/dstr.h>
+#include <cstring>
 
 namespace {
 const char *kConfigFileName = "joypad-to-obs.json";
+
+void profile_hotkey_callback(void *data, obs_hotkey_id id, obs_hotkey_t *hotkey,
+			     bool pressed)
+{
+	if (!pressed)
+		return;
+	auto *store = static_cast<JoypadConfigStore *>(data);
+	store->SwitchProfileByHotkey(id);
+	(void)hotkey;
 }
+
+void register_profile_hotkey(JoypadConfigStore *store, JoypadProfile &profile)
+{
+	if (profile.hotkey_id != OBS_INVALID_HOTKEY_ID)
+		return;
+
+	std::string name = "JoypadToOBS.Profile.Switch." + profile.name;
+	std::string desc = obs_module_text("JoypadToOBS.Hotkey.SwitchProfile");
+	size_t pos = desc.find("%1");
+	if (pos != std::string::npos) {
+		desc.replace(pos, 2, profile.name);
+	} else {
+		desc += ": " + profile.name;
+	}
+
+	profile.hotkey_id = obs_hotkey_register_frontend(
+		name.c_str(), desc.c_str(), profile_hotkey_callback, store);
+	obs_log(LOG_INFO, "Registered hotkey for profile '%s' with ID %d",
+		profile.name.c_str(), (int)profile.hotkey_id);
+}
+
+void unregister_profile_hotkey(JoypadProfile &profile)
+{
+	if (profile.hotkey_id != OBS_INVALID_HOTKEY_ID) {
+		obs_hotkey_unregister(profile.hotkey_id);
+		profile.hotkey_id = OBS_INVALID_HOTKEY_ID;
+	}
+}
+} // namespace
 
 static void ensure_config_dir()
 {
@@ -134,6 +176,10 @@ static void save_binding_to_data(const JoypadBinding &binding, obs_data_t *data)
 void JoypadConfigStore::Load()
 {
 	std::lock_guard<std::mutex> lock(mutex_);
+	for (auto &profile : profiles_) {
+		unregister_profile_hotkey(profile);
+	}
+
 	profiles_.clear();
 	current_profile_index_ = 0;
 	axis_active_.clear();
@@ -162,6 +208,11 @@ void JoypadConfigStore::Load()
 				obs_data_array_item(profiles_array, i);
 			JoypadProfile profile;
 			profile.name = obs_data_get_string(p_item, "name");
+			if (profile.name.empty()) {
+				obs_data_release(p_item);
+				continue;
+			}
+
 			obs_data_array_t *bindings_array =
 				obs_data_get_array(p_item, "bindings");
 			if (bindings_array) {
@@ -178,6 +229,20 @@ void JoypadConfigStore::Load()
 				}
 				obs_data_array_release(bindings_array);
 			}
+
+			register_profile_hotkey(this, profile);
+			obs_data_array_t *hotkey_data =
+				obs_data_get_array(p_item, "hotkey_data");
+			if (hotkey_data) {
+				size_t count = obs_data_array_count(hotkey_data);
+				if (profile.hotkey_id != OBS_INVALID_HOTKEY_ID) {
+					obs_hotkey_load(profile.hotkey_id, hotkey_data);
+					obs_log(LOG_INFO, "Loaded %d hotkey bindings for profile '%s'",
+						(int)count, profile.name.c_str());
+				}
+				obs_data_array_release(hotkey_data);
+			}
+
 			profiles_.push_back(profile);
 			obs_data_release(p_item);
 		}
@@ -230,7 +295,20 @@ void JoypadConfigStore::Load()
 		profiles_.push_back({"Default", {}});
 	}
 
+	for (auto &profile : profiles_) {
+		register_profile_hotkey(this, profile);
+	}
+
 	obs_data_release(data);
+}
+
+void JoypadConfigStore::Unload()
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	for (auto &profile : profiles_) {
+		unregister_profile_hotkey(profile);
+	}
+	profiles_.clear();
 }
 
 void JoypadConfigStore::Save()
@@ -260,6 +338,18 @@ void JoypadConfigStore::Save()
 		}
 		obs_data_set_array(p_item, "bindings", bindings_array);
 		obs_data_array_release(bindings_array);
+
+		if (profile.hotkey_id != OBS_INVALID_HOTKEY_ID) {
+			obs_data_array_t *hotkey_data =
+				obs_hotkey_save(profile.hotkey_id);
+			int count = hotkey_data ? (int)obs_data_array_count(hotkey_data) : 0;
+			obs_log(LOG_INFO, "Saving %d hotkey bindings for profile '%s'",
+				count, profile.name.c_str());
+			if (hotkey_data) {
+				obs_data_set_array(p_item, "hotkey_data", hotkey_data);
+				obs_data_array_release(hotkey_data);
+			}
+		}
 
 		obs_data_array_push_back(profiles_array, p_item);
 		obs_data_release(p_item);
@@ -317,6 +407,102 @@ void JoypadConfigStore::ClearAxisLastRaw()
 {
 	std::lock_guard<std::mutex> lock(mutex_);
 	axis_last_raw_.clear();
+}
+
+void JoypadConfigStore::SwitchProfileByHotkey(obs_hotkey_id id)
+{
+	bool changed = false;
+	std::string name;
+	{
+		std::lock_guard<std::mutex> lock(mutex_);
+		for (size_t i = 0; i < profiles_.size(); ++i) {
+			if (profiles_[i].hotkey_id == id) {
+				if ((int)i != current_profile_index_) {
+					current_profile_index_ = (int)i;
+					name = profiles_[i].name;
+					changed = true;
+				}
+				break;
+			}
+		}
+	}
+	if (changed) {
+		Save();
+		obs_log(LOG_INFO, "Switched to profile '%s' via hotkey", name.c_str());
+	}
+}
+
+void JoypadConfigStore::SortAndRegisterHotkeys(std::unique_lock<std::mutex> &lock)
+{
+	std::string current_name;
+	if (current_profile_index_ >= 0 &&
+	    current_profile_index_ < (int)profiles_.size()) {
+		current_name = profiles_[current_profile_index_].name;
+	}
+
+	struct TempProfile {
+		JoypadProfile profile;
+		obs_data_array_t *hotkey_data = nullptr;
+	};
+	std::vector<TempProfile> temp_list;
+	temp_list.reserve(profiles_.size());
+
+	// Move profiles to temp list and clear main list to avoid access during unlock
+	for (auto &profile : profiles_) {
+		TempProfile tp;
+		tp.profile = std::move(profile);
+		temp_list.push_back(std::move(tp));
+	}
+	profiles_.clear();
+
+	// Unlock to perform OBS API calls safely
+	lock.unlock();
+
+	for (auto &tp : temp_list) {
+		if (tp.profile.hotkey_id != OBS_INVALID_HOTKEY_ID) {
+			tp.hotkey_data = obs_hotkey_save(tp.profile.hotkey_id);
+			obs_hotkey_unregister(tp.profile.hotkey_id);
+			tp.profile.hotkey_id = OBS_INVALID_HOTKEY_ID;
+		}
+	}
+
+	std::sort(temp_list.begin(), temp_list.end(),
+		  [](const TempProfile &a, const TempProfile &b) {
+			  std::string sa = a.profile.name;
+			  std::string sb = b.profile.name;
+			  std::transform(sa.begin(), sa.end(), sa.begin(), ::tolower);
+			  std::transform(sb.begin(), sb.end(), sb.begin(), ::tolower);
+			  return sa < sb;
+		  });
+
+	for (auto &tp : temp_list) {
+		register_profile_hotkey(this, tp.profile);
+		if (tp.hotkey_data) {
+			if (tp.profile.hotkey_id != OBS_INVALID_HOTKEY_ID) {
+				obs_hotkey_load(tp.profile.hotkey_id,
+						tp.hotkey_data);
+			}
+			obs_data_array_release(tp.hotkey_data);
+			tp.hotkey_data = nullptr;
+		}
+	}
+
+	// Re-lock to update state
+	lock.lock();
+
+	// Re-check current name in case it changed (though unlikely with cleared profiles)
+	if (current_profile_index_ >= 0 && current_profile_index_ < (int)profiles_.size()) {
+		current_name = profiles_[current_profile_index_].name;
+	}
+
+	current_profile_index_ = 0;
+	for (size_t i = 0; i < temp_list.size(); ++i) {
+		auto &tp = temp_list[i];
+		if (tp.profile.name == current_name) {
+			current_profile_index_ = (int)i;
+		}
+		profiles_.push_back(std::move(tp.profile));
+	}
 }
 
 void JoypadConfigStore::AddBinding(const JoypadBinding &binding)
@@ -520,9 +706,11 @@ void JoypadConfigStore::SetCurrentProfile(int index)
 void JoypadConfigStore::AddProfile(const std::string &name)
 {
 	{
-		std::lock_guard<std::mutex> lock(mutex_);
-		profiles_.push_back({name, {}});
+		std::unique_lock<std::mutex> lock(mutex_);
+		JoypadProfile new_profile = {name, {}};
+		profiles_.push_back(new_profile);
 		current_profile_index_ = (int)profiles_.size() - 1;
+		SortAndRegisterHotkeys(lock);
 	}
 	Save();
 }
@@ -530,9 +718,10 @@ void JoypadConfigStore::AddProfile(const std::string &name)
 void JoypadConfigStore::RenameProfile(int index, const std::string &new_name)
 {
 	{
-		std::lock_guard<std::mutex> lock(mutex_);
+		std::unique_lock<std::mutex> lock(mutex_);
 		if (index >= 0 && index < (int)profiles_.size()) {
 			profiles_[index].name = new_name;
+			SortAndRegisterHotkeys(lock);
 		}
 	}
 	Save();
@@ -541,14 +730,28 @@ void JoypadConfigStore::RenameProfile(int index, const std::string &new_name)
 void JoypadConfigStore::RemoveProfile(int index)
 {
 	{
-		std::lock_guard<std::mutex> lock(mutex_);
+		std::unique_lock<std::mutex> lock(mutex_);
 		if (profiles_.size() <= 1) {
 			return; // Cannot remove last profile
 		}
 		if (index >= 0 && index < (int)profiles_.size()) {
-			profiles_.erase(profiles_.begin() + index);
-			if (current_profile_index_ >= (int)profiles_.size()) {
-				current_profile_index_ = (int)profiles_.size() - 1;
+			obs_hotkey_id hid = profiles_[index].hotkey_id;
+			profiles_[index].hotkey_id = OBS_INVALID_HOTKEY_ID;
+
+			lock.unlock();
+			if (hid != OBS_INVALID_HOTKEY_ID) {
+				obs_hotkey_unregister(hid);
+			}
+			lock.lock();
+
+			if (index < (int)profiles_.size()) {
+				profiles_.erase(profiles_.begin() + index);
+				if (index < current_profile_index_) {
+					current_profile_index_--;
+				}
+				if (current_profile_index_ >= (int)profiles_.size()) {
+					current_profile_index_ = (int)profiles_.size() - 1;
+				}
 			}
 		}
 	}
@@ -558,12 +761,14 @@ void JoypadConfigStore::RemoveProfile(int index)
 void JoypadConfigStore::DuplicateProfile(int index, const std::string &new_name)
 {
 	{
-		std::lock_guard<std::mutex> lock(mutex_);
+		std::unique_lock<std::mutex> lock(mutex_);
 		if (index >= 0 && index < (int)profiles_.size()) {
 			JoypadProfile new_profile = profiles_[index];
 			new_profile.name = new_name;
+			new_profile.hotkey_id = OBS_INVALID_HOTKEY_ID;
 			profiles_.push_back(new_profile);
 			current_profile_index_ = (int)profiles_.size() - 1;
+			SortAndRegisterHotkeys(lock);
 		}
 	}
 	Save();
@@ -589,6 +794,14 @@ bool JoypadConfigStore::ExportProfile(int index, const std::string &filepath)
 	obs_data_set_array(root, "bindings", arr);
 	obs_data_array_release(arr);
 
+	if (profile.hotkey_id != OBS_INVALID_HOTKEY_ID) {
+		obs_data_array_t *hotkey_data = obs_hotkey_save(profile.hotkey_id);
+		if (hotkey_data) {
+			obs_data_set_array(root, "hotkey_data", hotkey_data);
+			obs_data_array_release(hotkey_data);
+		}
+	}
+
 	bool success = obs_data_save_json(root, filepath.c_str());
 	obs_data_release(root);
 	return success;
@@ -608,6 +821,8 @@ bool JoypadConfigStore::ImportProfile(const std::string &filepath)
 		profile.name = "Imported";
 	}
 
+	obs_data_array_t *hotkey_data = obs_data_get_array(root, "hotkey_data");
+
 	obs_data_array_t *arr = obs_data_get_array(root, "bindings");
 	if (arr) {
 		size_t count = obs_data_array_count(arr);
@@ -623,7 +838,7 @@ bool JoypadConfigStore::ImportProfile(const std::string &filepath)
 	obs_data_release(root);
 
 	{
-		std::lock_guard<std::mutex> lock(mutex_);
+		std::unique_lock<std::mutex> lock(mutex_);
 		std::string base_name = profile.name;
 		int counter = 1;
 		bool collision = true;
@@ -645,9 +860,89 @@ bool JoypadConfigStore::ImportProfile(const std::string &filepath)
 				profile.name = base_name + " (" + std::to_string(counter++) + ")";
 			}
 		}
+		profile.hotkey_id = OBS_INVALID_HOTKEY_ID;
 		profiles_.push_back(profile);
 		current_profile_index_ = (int)profiles_.size() - 1;
+		SortAndRegisterHotkeys(lock);
+
+		if (hotkey_data) {
+			obs_hotkey_id id = OBS_INVALID_HOTKEY_ID;
+			if (current_profile_index_ >= 0 &&
+			    current_profile_index_ < (int)profiles_.size()) {
+				id = profiles_[current_profile_index_].hotkey_id;
+			}
+			lock.unlock();
+			if (id != OBS_INVALID_HOTKEY_ID) {
+				obs_hotkey_load(id, hotkey_data);
+			}
+			obs_data_array_release(hotkey_data);
+		}
 	}
 	Save();
 	return true;
+}
+
+std::string JoypadConfigStore::GetProfileHotkeyString(int index) const
+{
+	obs_hotkey_id id = OBS_INVALID_HOTKEY_ID;
+	{
+		std::lock_guard<std::mutex> lock(mutex_);
+		if (index >= 0 && index < (int)profiles_.size()) {
+			id = profiles_[index].hotkey_id;
+		}
+	}
+
+	if (id == OBS_INVALID_HOTKEY_ID) {
+		return "";
+	}
+
+	obs_data_array_t *bindings = obs_hotkey_save(id);
+	if (!bindings) {
+		return "";
+	}
+
+	std::string result;
+	size_t count = obs_data_array_count(bindings);
+	for (size_t i = 0; i < count; ++i) {
+		obs_data_t *item = obs_data_array_item(bindings, i);
+		const char *key_name = obs_data_get_string(item, "key");
+		bool shift = obs_data_get_bool(item, "shift");
+		bool control = obs_data_get_bool(item, "control");
+		bool alt = obs_data_get_bool(item, "alt");
+		bool command = obs_data_get_bool(item, "command");
+
+		bool has_key = key_name && *key_name && strcmp(key_name, "OBS_KEY_NONE") != 0;
+
+		// Skip empty bindings
+		if (!has_key && !shift && !control && !alt && !command) {
+			obs_data_release(item);
+			continue;
+		}
+
+		if (control) result += "Ctrl + ";
+		if (shift) result += "Shift + ";
+#ifdef __APPLE__
+		if (alt) result += "Option + ";
+		if (command) result += "Cmd + ";
+#else
+		if (alt) result += "Alt + ";
+		if (command) result += "Win + ";
+#endif
+
+		if (has_key) {
+			if (strncmp(key_name, "OBS_KEY_", 8) == 0) {
+				result += (key_name + 8);
+			} else {
+				result += key_name;
+			}
+		} else {
+			if (result.length() >= 3 && result.substr(result.length() - 3) == " + ") {
+				result = result.substr(0, result.length() - 3);
+			}
+		}
+		obs_data_release(item);
+		if (!result.empty()) break;
+	}
+	obs_data_array_release(bindings);
+	return result;
 }

@@ -27,6 +27,7 @@ class QTableWidget;
 class QPushButton;
 class QLabel;
 class QComboBox;
+class QTimer;
 
 class JoypadToolsDialog : public QDialog {
 public:
@@ -35,9 +36,9 @@ public:
 	~JoypadToolsDialog();
 
 	void RefreshBindings();
+	void RefreshProfiles();
 
 private:
-	void RefreshProfiles();
 	int SelectedRow() const;
 
 	JoypadConfigStore *config_ = nullptr;
@@ -49,4 +50,5 @@ private:
 	QPushButton *clear_button_ = nullptr;
 	QLabel *axis_live_label_ = nullptr;
 	QComboBox *profile_combo_ = nullptr;
+	QTimer *update_timer_ = nullptr;
 };
