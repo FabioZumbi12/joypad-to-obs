@@ -97,6 +97,7 @@ struct JoypadEvent {
 
 struct JoypadProfile {
 	std::string name;
+	std::string comment;
 	std::vector<JoypadBinding> bindings;
 	obs_hotkey_id hotkey_id = OBS_INVALID_HOTKEY_ID;
 };
@@ -106,6 +107,8 @@ public:
 	void Load();
 	void Save();
 	void Unload();
+	bool HasUnsavedChanges() const;
+	void DiscardChanges();
 
 	void AddBinding(const JoypadBinding &binding);
 	void RemoveBinding(size_t index);
@@ -125,6 +128,8 @@ public:
 	void SetCurrentProfile(int index);
 	void AddProfile(const std::string &name);
 	void RenameProfile(int index, const std::string &new_name);
+	void SetProfileComment(int index, const std::string &comment);
+	std::string GetProfileComment(int index) const;
 	void RemoveProfile(int index);
 	void DuplicateProfile(int index, const std::string &new_name);
 	bool ExportProfile(int index, const std::string &filepath);
@@ -137,6 +142,7 @@ private:
 	std::vector<JoypadProfile> profiles_;
 	int current_profile_index_ = 0;
 	mutable std::mutex mutex_;
+	bool dirty_ = false;
 	mutable std::unordered_map<std::string, bool> axis_active_;
 	std::unordered_map<std::string, double> axis_last_raw_;
 	std::string last_file_path_;

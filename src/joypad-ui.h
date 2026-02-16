@@ -23,11 +23,13 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 
 #include <QDialog>
 
+class QCloseEvent;
 class QTableWidget;
 class QPushButton;
 class QLabel;
 class QComboBox;
 class QTimer;
+class QPlainTextEdit;
 
 class JoypadToolsDialog : public QDialog {
 public:
@@ -36,6 +38,9 @@ public:
 
 	void RefreshBindings();
 	void RefreshProfiles();
+
+protected:
+	void closeEvent(QCloseEvent *event) override;
 
 private:
 	int SelectedRow() const;
@@ -47,7 +52,10 @@ private:
 	QPushButton *add_button_ = nullptr;
 	QPushButton *remove_button_ = nullptr;
 	QPushButton *clear_button_ = nullptr;
+	QPushButton *save_button_ = nullptr;
 	QLabel *axis_live_label_ = nullptr;
 	QComboBox *profile_combo_ = nullptr;
+	QPlainTextEdit *profile_comment_ = nullptr;
 	QTimer *update_timer_ = nullptr;
+	QTimer *comment_debounce_timer_ = nullptr;
 };

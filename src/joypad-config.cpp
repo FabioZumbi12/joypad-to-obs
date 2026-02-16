@@ -137,23 +137,66 @@ static void save_binding_to_data(const JoypadBinding &binding, obs_data_t *data)
 	obs_data_set_string(data, "device_name", binding.device_name.c_str());
 	obs_data_set_int(data, "button", binding.button);
 	obs_data_set_int(data, "input_type", (int)binding.input_type);
-	obs_data_set_int(data, "axis_index", binding.axis_index);
-	obs_data_set_int(data, "axis_direction", (int)binding.axis_direction);
-	obs_data_set_double(data, "axis_threshold", binding.axis_threshold);
-	obs_data_set_bool(data, "axis_threshold_set", true);
-	obs_data_set_int(data, "axis_interval_ms", binding.axis_interval_ms);
-	obs_data_set_double(data, "axis_min_value", binding.axis_min_value);
-	obs_data_set_double(data, "axis_max_value", binding.axis_max_value);
+	if (binding.input_type == JoypadInputType::Axis) {
+		obs_data_set_int(data, "axis_index", binding.axis_index);
+		obs_data_set_int(data, "axis_direction", (int)binding.axis_direction);
+		obs_data_set_double(data, "axis_threshold", binding.axis_threshold);
+		obs_data_set_bool(data, "axis_threshold_set", true);
+		obs_data_set_int(data, "axis_interval_ms", binding.axis_interval_ms);
+		obs_data_set_double(data, "axis_min_value", binding.axis_min_value);
+		obs_data_set_double(data, "axis_max_value", binding.axis_max_value);
+	}
 	obs_data_set_int(data, "action", (int)binding.action);
-	obs_data_set_bool(data, "use_current_scene", binding.use_current_scene);
-	obs_data_set_string(data, "scene_name", binding.scene_name.c_str());
-	obs_data_set_string(data, "source_name", binding.source_name.c_str());
-	obs_data_set_string(data, "filter_name", binding.filter_name.c_str());
-	obs_data_set_bool(data, "bool_value", binding.bool_value);
-	obs_data_set_bool(data, "allow_above_unity", binding.allow_above_unity);
-	obs_data_set_double(data, "volume_value", binding.volume_value);
-	obs_data_set_double(data, "slider_gamma", binding.slider_gamma);
 	obs_data_set_bool(data, "enabled", binding.enabled);
+
+	switch (binding.action) {
+	case JoypadActionType::SwitchScene:
+		obs_data_set_string(data, "scene_name", binding.scene_name.c_str());
+		break;
+	case JoypadActionType::ToggleSourceVisibility:
+	case JoypadActionType::SetSourceVisibility:
+		obs_data_set_bool(data, "use_current_scene", binding.use_current_scene);
+		if (!binding.use_current_scene) {
+			obs_data_set_string(data, "scene_name", binding.scene_name.c_str());
+		}
+		obs_data_set_string(data, "source_name", binding.source_name.c_str());
+		if (binding.action == JoypadActionType::SetSourceVisibility) {
+			obs_data_set_bool(data, "bool_value", binding.bool_value);
+		}
+		break;
+	case JoypadActionType::ToggleSourceMute:
+	case JoypadActionType::SetSourceMute:
+		obs_data_set_string(data, "source_name", binding.source_name.c_str());
+		if (binding.action == JoypadActionType::SetSourceMute) {
+			obs_data_set_bool(data, "bool_value", binding.bool_value);
+		}
+		break;
+	case JoypadActionType::SetSourceVolume:
+	case JoypadActionType::AdjustSourceVolume:
+		obs_data_set_string(data, "source_name", binding.source_name.c_str());
+		obs_data_set_double(data, "volume_value", binding.volume_value);
+		obs_data_set_bool(data, "allow_above_unity", binding.allow_above_unity);
+		break;
+	case JoypadActionType::SetSourceVolumePercent:
+		obs_data_set_string(data, "source_name", binding.source_name.c_str());
+		obs_data_set_double(data, "slider_gamma", binding.slider_gamma);
+		break;
+	case JoypadActionType::MediaPlayPause:
+	case JoypadActionType::MediaRestart:
+	case JoypadActionType::MediaStop:
+		obs_data_set_string(data, "source_name", binding.source_name.c_str());
+		break;
+	case JoypadActionType::ToggleFilterEnabled:
+	case JoypadActionType::SetFilterEnabled:
+		obs_data_set_string(data, "source_name", binding.source_name.c_str());
+		obs_data_set_string(data, "filter_name", binding.filter_name.c_str());
+		if (binding.action == JoypadActionType::SetFilterEnabled) {
+			obs_data_set_bool(data, "bool_value", binding.bool_value);
+		}
+		break;
+	default:
+		break;
+	}
 }
 
 void JoypadConfigStore::Load()
@@ -167,6 +210,7 @@ void JoypadConfigStore::Load()
 	current_profile_index_ = 0;
 	axis_active_.clear();
 	axis_last_raw_.clear();
+	dirty_ = false;
 
 	ensure_config_dir();
 
@@ -179,6 +223,9 @@ void JoypadConfigStore::Load()
 	bfree(config_path);
 
 	if (!data) {
+		profiles_.push_back({"Default", {}});
+		current_profile_index_ = 0;
+		register_profile_hotkey(this, profiles_[0]);
 		return;
 	}
 
@@ -189,6 +236,7 @@ void JoypadConfigStore::Load()
 			obs_data_t *p_item = obs_data_array_item(profiles_array, i);
 			JoypadProfile profile;
 			profile.name = obs_data_get_string(p_item, "name");
+			profile.comment = obs_data_get_string(p_item, "comment");
 			if (profile.name.empty()) {
 				obs_data_release(p_item);
 				continue;
@@ -273,6 +321,17 @@ void JoypadConfigStore::Load()
 	obs_data_release(data);
 }
 
+bool JoypadConfigStore::HasUnsavedChanges() const
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	return dirty_;
+}
+
+void JoypadConfigStore::DiscardChanges()
+{
+	Load();
+}
+
 void JoypadConfigStore::Unload()
 {
 	std::lock_guard<std::mutex> lock(mutex_);
@@ -299,6 +358,7 @@ void JoypadConfigStore::Save()
 	for (const auto &profile : profiles_) {
 		obs_data_t *p_item = obs_data_create();
 		obs_data_set_string(p_item, "name", profile.name.c_str());
+		obs_data_set_string(p_item, "comment", profile.comment.c_str());
 
 		obs_data_array_t *bindings_array = obs_data_array_create();
 		for (const auto &binding : profile.bindings) {
@@ -342,6 +402,7 @@ void JoypadConfigStore::Save()
 	if (!obs_data_save_json(data, config_path)) {
 		obs_log(LOG_WARNING, "Nao foi possivel salvar %s", config_path);
 	}
+	dirty_ = false;
 
 	obs_data_release(data);
 	bfree(config_path);
@@ -395,7 +456,7 @@ void JoypadConfigStore::SwitchProfileByHotkey(obs_hotkey_id id)
 		}
 	}
 	if (changed) {
-		Save();
+		dirty_ = true;
 		obs_log(LOG_INFO, "Switched to profile '%s' via hotkey", name.c_str());
 	}
 }
@@ -478,7 +539,7 @@ void JoypadConfigStore::AddBinding(const JoypadBinding &binding)
 			profiles_[current_profile_index_].bindings.push_back(binding);
 		}
 	}
-	Save();
+	dirty_ = true;
 }
 
 void JoypadConfigStore::RemoveBinding(size_t index)
@@ -491,7 +552,7 @@ void JoypadConfigStore::RemoveBinding(size_t index)
 				bindings.erase(bindings.begin() + (ptrdiff_t)index);
 		}
 	}
-	Save();
+	dirty_ = true;
 }
 
 void JoypadConfigStore::UpdateBinding(size_t index, const JoypadBinding &binding)
@@ -504,7 +565,7 @@ void JoypadConfigStore::UpdateBinding(size_t index, const JoypadBinding &binding
 				bindings[index] = binding;
 		}
 	}
-	Save();
+	dirty_ = true;
 }
 
 void JoypadConfigStore::ClearCurrentProfileBindings()
@@ -515,7 +576,7 @@ void JoypadConfigStore::ClearCurrentProfileBindings()
 			profiles_[current_profile_index_].bindings.clear();
 		}
 	}
-	Save();
+	dirty_ = true;
 }
 
 std::vector<JoypadBinding> JoypadConfigStore::GetBindingsSnapshot() const
@@ -640,7 +701,7 @@ void JoypadConfigStore::SetCurrentProfile(int index)
 			current_profile_index_ = index;
 		}
 	}
-	Save();
+	dirty_ = true;
 }
 
 void JoypadConfigStore::AddProfile(const std::string &name)
@@ -652,7 +713,7 @@ void JoypadConfigStore::AddProfile(const std::string &name)
 		current_profile_index_ = (int)profiles_.size() - 1;
 		SortAndRegisterHotkeys(lock);
 	}
-	Save();
+	dirty_ = true;
 }
 
 void JoypadConfigStore::RenameProfile(int index, const std::string &new_name)
@@ -664,7 +725,27 @@ void JoypadConfigStore::RenameProfile(int index, const std::string &new_name)
 			SortAndRegisterHotkeys(lock);
 		}
 	}
-	Save();
+	dirty_ = true;
+}
+
+void JoypadConfigStore::SetProfileComment(int index, const std::string &comment)
+{
+	{
+		std::lock_guard<std::mutex> lock(mutex_);
+		if (index >= 0 && index < (int)profiles_.size()) {
+			profiles_[index].comment = comment;
+		}
+	}
+	dirty_ = true;
+}
+
+std::string JoypadConfigStore::GetProfileComment(int index) const
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	if (index >= 0 && index < (int)profiles_.size()) {
+		return profiles_[index].comment;
+	}
+	return "";
 }
 
 void JoypadConfigStore::RemoveProfile(int index)
@@ -695,7 +776,7 @@ void JoypadConfigStore::RemoveProfile(int index)
 			}
 		}
 	}
-	Save();
+	dirty_ = true;
 }
 
 void JoypadConfigStore::DuplicateProfile(int index, const std::string &new_name)
@@ -705,13 +786,14 @@ void JoypadConfigStore::DuplicateProfile(int index, const std::string &new_name)
 		if (index >= 0 && index < (int)profiles_.size()) {
 			JoypadProfile new_profile = profiles_[index];
 			new_profile.name = new_name;
+			// Comment is copied automatically
 			new_profile.hotkey_id = OBS_INVALID_HOTKEY_ID;
 			profiles_.push_back(new_profile);
 			current_profile_index_ = (int)profiles_.size() - 1;
 			SortAndRegisterHotkeys(lock);
 		}
 	}
-	Save();
+	dirty_ = true;
 }
 
 bool JoypadConfigStore::ExportProfile(int index, const std::string &filepath)
@@ -724,6 +806,7 @@ bool JoypadConfigStore::ExportProfile(int index, const std::string &filepath)
 
 	obs_data_t *root = obs_data_create();
 	obs_data_set_string(root, "profile_name", profile.name.c_str());
+	obs_data_set_string(root, "profile_comment", profile.comment.c_str());
 	obs_data_array_t *arr = obs_data_array_create();
 	for (const auto &b : profile.bindings) {
 		obs_data_t *item = obs_data_create();
@@ -759,6 +842,7 @@ bool JoypadConfigStore::ImportProfile(const std::string &filepath)
 	if (profile.name.empty()) {
 		profile.name = "Imported";
 	}
+	profile.comment = obs_data_get_string(root, "profile_comment");
 
 	obs_data_array_t *hotkey_data = obs_data_get_array(root, "hotkey_data");
 
@@ -813,7 +897,7 @@ bool JoypadConfigStore::ImportProfile(const std::string &filepath)
 			obs_data_array_release(hotkey_data);
 		}
 	}
-	Save();
+	dirty_ = true;
 	return true;
 }
 
@@ -901,5 +985,5 @@ void JoypadConfigStore::SetLastFilePath(const std::string &path)
 		std::lock_guard<std::mutex> lock(mutex_);
 		last_file_path_ = path;
 	}
-	Save();
+	dirty_ = true;
 }

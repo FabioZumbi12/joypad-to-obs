@@ -34,7 +34,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <QHBoxLayout>
 #include <QVBoxLayout>
 #include <QToolButton>
-#include <QLineEdit>
+#include <QPlainTextEdit>
 #include <QMetaObject>
 #include <QInputDialog>
 #include <QMessageBox>
@@ -48,6 +48,8 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <QStyle>
 #include <QFileInfo>
 #include <QDir>
+#include <QSplitter>
+#include <QCloseEvent>
 
 #include <algorithm>
 #include <cmath>
@@ -787,13 +789,22 @@ private:
 		bool needs_scene = (action == JoypadActionType::SwitchScene) ||
 				   (action == JoypadActionType::ToggleSourceVisibility) ||
 				   (action == JoypadActionType::SetSourceVisibility);
-		bool needs_source = (action != JoypadActionType::SwitchScene);
+		bool needs_source =
+			(action == JoypadActionType::ToggleSourceVisibility) ||
+			(action == JoypadActionType::SetSourceVisibility) ||
+			(action == JoypadActionType::ToggleSourceMute) || (action == JoypadActionType::SetSourceMute) ||
+			(action == JoypadActionType::SetSourceVolume) ||
+			(action == JoypadActionType::AdjustSourceVolume) ||
+			(action == JoypadActionType::SetSourceVolumePercent) ||
+			(action == JoypadActionType::MediaPlayPause) || (action == JoypadActionType::MediaRestart) ||
+			(action == JoypadActionType::MediaStop) || (action == JoypadActionType::ToggleFilterEnabled) ||
+			(action == JoypadActionType::SetFilterEnabled);
 		bool needs_filter = (action == JoypadActionType::ToggleFilterEnabled) ||
 				    (action == JoypadActionType::SetFilterEnabled);
 
 		scene_combo_->setEnabled(needs_scene);
 		use_current_scene_->setEnabled(needs_scene && action != JoypadActionType::SwitchScene);
-		if (use_current_scene_->isChecked()) {
+		if (use_current_scene_->isEnabled() && use_current_scene_->isChecked()) {
 			scene_combo_->setEnabled(false);
 		}
 		source_combo_->setEnabled(needs_source);
@@ -976,6 +987,64 @@ private:
 		} else {
 			binding_.volume_value = is_volume_action ? volume_spin_->value() : 0.0;
 		}
+
+		// Cleanup unused fields based on action
+		if (binding_.input_type != JoypadInputType::Axis) {
+			binding_.axis_index = -1;
+			binding_.axis_threshold = 0.5;
+			binding_.axis_min_value = 0.0;
+			binding_.axis_max_value = 1024.0;
+		}
+
+		bool needs_scene = (binding_.action == JoypadActionType::SwitchScene) ||
+				   (binding_.action == JoypadActionType::ToggleSourceVisibility) ||
+				   (binding_.action == JoypadActionType::SetSourceVisibility);
+		bool needs_use_current = (binding_.action == JoypadActionType::ToggleSourceVisibility ||
+					  binding_.action == JoypadActionType::SetSourceVisibility);
+		bool needs_source = (binding_.action == JoypadActionType::ToggleSourceVisibility) ||
+				    (binding_.action == JoypadActionType::SetSourceVisibility) ||
+				    (binding_.action == JoypadActionType::ToggleSourceMute) ||
+				    (binding_.action == JoypadActionType::SetSourceMute) ||
+				    (binding_.action == JoypadActionType::SetSourceVolume) ||
+				    (binding_.action == JoypadActionType::AdjustSourceVolume) ||
+				    (binding_.action == JoypadActionType::SetSourceVolumePercent) ||
+				    (binding_.action == JoypadActionType::MediaPlayPause) ||
+				    (binding_.action == JoypadActionType::MediaRestart) ||
+				    (binding_.action == JoypadActionType::MediaStop) ||
+				    (binding_.action == JoypadActionType::ToggleFilterEnabled) ||
+				    (binding_.action == JoypadActionType::SetFilterEnabled);
+		bool needs_filter = (binding_.action == JoypadActionType::ToggleFilterEnabled ||
+				     binding_.action == JoypadActionType::SetFilterEnabled);
+		bool needs_bool = (binding_.action == JoypadActionType::SetSourceVisibility ||
+				   binding_.action == JoypadActionType::SetSourceMute ||
+				   binding_.action == JoypadActionType::SetFilterEnabled);
+		bool needs_volume = (binding_.action == JoypadActionType::SetSourceVolume ||
+				     binding_.action == JoypadActionType::AdjustSourceVolume);
+		bool needs_gamma = (binding_.action == JoypadActionType::SetSourceVolumePercent);
+		bool needs_unity = (binding_.action == JoypadActionType::SetSourceVolume ||
+				    binding_.action == JoypadActionType::AdjustSourceVolume);
+
+		if (!needs_scene) {
+			binding_.scene_name.clear();
+		}
+		if (!needs_use_current) {
+			binding_.use_current_scene = false;
+		} else if (binding_.use_current_scene) {
+			binding_.scene_name.clear();
+		}
+		if (!needs_source)
+			binding_.source_name.clear();
+		if (!needs_filter)
+			binding_.filter_name.clear();
+		if (!needs_bool)
+			binding_.bool_value = false;
+		if (!needs_volume)
+			binding_.volume_value = 0.0;
+		if (!needs_gamma)
+			binding_.slider_gamma = 0.6;
+		if (!needs_unity)
+			binding_.allow_above_unity = false;
+
 		return true;
 	}
 
@@ -1025,7 +1094,7 @@ JoypadToolsDialog::JoypadToolsDialog(QWidget *parent, JoypadConfigStore *config,
 {
 	setWindowTitle(obs_module_text("JoypadToOBS.DialogTitle"));
 	setModal(false);
-	resize(720, 360);
+	resize(800, 600);
 
 	auto *layout = new QVBoxLayout(this);
 
@@ -1035,7 +1104,7 @@ JoypadToolsDialog::JoypadToolsDialog(QWidget *parent, JoypadConfigStore *config,
 
 	// Profile Management UI
 	auto *profile_group = new QGroupBox(L("JoypadToOBS.Profile.Group"));
-	auto *profile_layout = new QHBoxLayout(profile_group);
+	auto *profile_layout = new QGridLayout(profile_group);
 
 	profile_combo_ = new QComboBox();
 	auto *add_profile_btn = new QToolButton();
@@ -1053,24 +1122,55 @@ JoypadToolsDialog::JoypadToolsDialog(QWidget *parent, JoypadConfigStore *config,
 	auto *import_profile_btn = new QPushButton(L("JoypadToOBS.Profile.Import"));
 	auto *export_profile_btn = new QPushButton(L("JoypadToOBS.Profile.Export"));
 
-	profile_layout->addWidget(new QLabel(L("JoypadToOBS.Profile.Name")));
-	profile_layout->addWidget(profile_combo_, 1);
-	profile_layout->addWidget(add_profile_btn);
-	profile_layout->addWidget(rename_profile_btn);
-	profile_layout->addWidget(duplicate_profile_btn);
-	profile_layout->addWidget(remove_profile_btn);
-	profile_layout->addWidget(new QFrame); // Spacer
-	profile_layout->addWidget(import_profile_btn);
-	profile_layout->addWidget(export_profile_btn);
+	profile_comment_ = new QPlainTextEdit();
+	profile_comment_->setPlaceholderText(L("JoypadToOBS.Profile.CommentPlaceholder"));
+	profile_comment_->setTabChangesFocus(true);
+	profile_comment_->setMinimumHeight(70);
 
-	layout->addWidget(profile_group);
+	profile_layout->addWidget(new QLabel(L("JoypadToOBS.Profile.Name")), 0, 0);
+	profile_layout->addWidget(profile_combo_, 0, 1);
+
+	auto *btn_layout = new QHBoxLayout();
+	btn_layout->setContentsMargins(0, 0, 0, 0);
+	btn_layout->addWidget(add_profile_btn);
+	btn_layout->addWidget(rename_profile_btn);
+	btn_layout->addWidget(duplicate_profile_btn);
+	btn_layout->addWidget(remove_profile_btn);
+	btn_layout->addStretch();
+	btn_layout->addWidget(import_profile_btn);
+	btn_layout->addWidget(export_profile_btn);
+	profile_layout->addLayout(btn_layout, 0, 2);
+
+	profile_layout->addWidget(new QLabel(L("JoypadToOBS.Profile.Comment")), 1, 0);
+	profile_layout->addWidget(profile_comment_, 1, 1, 1, 2);
+	profile_layout->setColumnStretch(1, 1);
+	profile_layout->setRowStretch(1, 1);
+
+	comment_debounce_timer_ = new QTimer(this);
+	comment_debounce_timer_->setSingleShot(true);
+	comment_debounce_timer_->setInterval(1000);
+
+	connect(comment_debounce_timer_, &QTimer::timeout, this, [this]() {
+		int idx = config_->GetCurrentProfileIndex();
+		config_->SetProfileComment(idx, profile_comment_->toPlainText().toStdString());
+	});
 
 	connect(profile_combo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
 		if (index >= 0) {
+			if (comment_debounce_timer_->isActive()) {
+				comment_debounce_timer_->stop();
+				int old_idx = config_->GetCurrentProfileIndex();
+				config_->SetProfileComment(old_idx, profile_comment_->toPlainText().toStdString());
+			}
 			config_->SetCurrentProfile(index);
+			profile_comment_->blockSignals(true);
+			profile_comment_->setPlainText(QString::fromStdString(config_->GetProfileComment(index)));
+			profile_comment_->blockSignals(false);
 			RefreshBindings();
 		}
 	});
+
+	connect(profile_comment_, &QPlainTextEdit::textChanged, this, [this]() { comment_debounce_timer_->start(); });
 
 	connect(add_profile_btn, &QToolButton::clicked, this, [this]() {
 		bool ok;
@@ -1224,13 +1324,21 @@ JoypadToolsDialog::JoypadToolsDialog(QWidget *parent, JoypadConfigStore *config,
 	table_->setSelectionMode(QAbstractItemView::SingleSelection);
 	table_->setEditTriggers(QAbstractItemView::NoEditTriggers);
 
-	layout->addWidget(table_);
-	layout->setStretchFactor(table_, 1);
+	auto *splitter = new QSplitter(Qt::Vertical);
+	splitter->addWidget(profile_group);
+	splitter->addWidget(table_);
+	splitter->setStretchFactor(1, 1);
+	splitter->setCollapsible(0, false);
+	splitter->setCollapsible(1, false);
+	splitter->setSizes({0, 100000});
+	layout->addWidget(splitter);
 
 	auto *button_row = new QHBoxLayout();
 	add_button_ = new QPushButton(L("JoypadToOBS.Button.AddCommand"), this);
 	remove_button_ = new QPushButton(L("JoypadToOBS.Button.Remove"), this);
 	clear_button_ = new QPushButton(L("JoypadToOBS.Button.ClearAll"), this);
+	save_button_ = new QPushButton(L("JoypadToOBS.Button.Save"), this);
+	save_button_->setEnabled(config_->HasUnsavedChanges());
 	auto *close_button = new QPushButton(L("JoypadToOBS.Button.Close"), this);
 
 	QLabel *developerLabel = new QLabel(
@@ -1243,6 +1351,7 @@ JoypadToolsDialog::JoypadToolsDialog(QWidget *parent, JoypadConfigStore *config,
 	button_row->addWidget(clear_button_);
 	button_row->addStretch();
 	button_row->addWidget(developerLabel);
+	button_row->addWidget(save_button_);
 	button_row->addWidget(close_button);
 
 	layout->addLayout(button_row);
@@ -1271,6 +1380,8 @@ JoypadToolsDialog::JoypadToolsDialog(QWidget *parent, JoypadConfigStore *config,
 		}
 	});
 
+	connect(save_button_, &QPushButton::clicked, this, [this]() { config_->Save(); });
+
 	connect(close_button, &QPushButton::clicked, this, &QDialog::close);
 
 	update_timer_ = new QTimer(this);
@@ -1284,6 +1395,7 @@ JoypadToolsDialog::JoypadToolsDialog(QWidget *parent, JoypadConfigStore *config,
 			}
 			profile_combo_->blockSignals(false);
 		}
+		save_button_->setEnabled(config_->HasUnsavedChanges());
 	});
 	update_timer_->start(200);
 
@@ -1291,7 +1403,35 @@ JoypadToolsDialog::JoypadToolsDialog(QWidget *parent, JoypadConfigStore *config,
 	table_->resizeColumnsToContents();
 }
 
-JoypadToolsDialog::~JoypadToolsDialog() {}
+JoypadToolsDialog::~JoypadToolsDialog()
+{
+	if (comment_debounce_timer_ && comment_debounce_timer_->isActive()) {
+		int idx = config_->GetCurrentProfileIndex();
+		config_->SetProfileComment(idx, profile_comment_->toPlainText().toStdString());
+	}
+}
+
+void JoypadToolsDialog::closeEvent(QCloseEvent *event)
+{
+	if (config_->HasUnsavedChanges()) {
+		QMessageBox::StandardButton reply;
+		reply = QMessageBox::question(this, L("JoypadToOBS.Dialog.UnsavedChangesTitle"),
+					      L("JoypadToOBS.Dialog.UnsavedChangesText"),
+					      QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
+		if (reply == QMessageBox::Save) {
+			config_->Save();
+			event->accept();
+		} else if (reply == QMessageBox::Discard) {
+			config_->DiscardChanges();
+			RefreshProfiles(); // Refresh UI to reflect discarded changes
+			event->accept();
+		} else {
+			event->ignore();
+		}
+	} else {
+		event->accept();
+	}
+}
 
 void JoypadToolsDialog::RefreshProfiles()
 {
@@ -1310,6 +1450,9 @@ void JoypadToolsDialog::RefreshProfiles()
 	if (current >= 0 && current < profile_combo_->count()) {
 		profile_combo_->setCurrentIndex(current);
 	}
+	profile_comment_->blockSignals(true);
+	profile_comment_->setPlainText(QString::fromStdString(config_->GetProfileComment(current)));
+	profile_comment_->blockSignals(false);
 	profile_combo_->blockSignals(false);
 
 	RefreshBindings();
@@ -1454,6 +1597,7 @@ void JoypadToolsDialog::RefreshBindings()
 				}
 			});
 	}
+	table_->resizeColumnsToContents();
 }
 
 int JoypadToolsDialog::SelectedRow() const
