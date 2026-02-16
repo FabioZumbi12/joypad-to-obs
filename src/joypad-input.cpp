@@ -79,8 +79,7 @@ void JoypadInputManager::Stop()
 
 #if defined(__APPLE__)
 	if (hid_manager_) {
-		IOHIDManagerClose((IOHIDManagerRef)hid_manager_,
-				  kIOHIDOptionsTypeNone);
+		IOHIDManagerClose((IOHIDManagerRef)hid_manager_, kIOHIDOptionsTypeNone);
 		CFRelease((IOHIDManagerRef)hid_manager_);
 		hid_manager_ = nullptr;
 		hid_run_loop_ = nullptr;
@@ -125,14 +124,12 @@ void JoypadInputManager::RefreshDevices()
 		if (!value || !*value) {
 			return std::string();
 		}
-		int len = WideCharToMultiByte(CP_UTF8, 0, value, -1, nullptr,
-					      0, nullptr, nullptr);
+		int len = WideCharToMultiByte(CP_UTF8, 0, value, -1, nullptr, 0, nullptr, nullptr);
 		if (len <= 0) {
 			return std::string();
 		}
 		std::vector<char> buf(len);
-		WideCharToMultiByte(CP_UTF8, 0, value, -1, buf.data(), len,
-				    nullptr, nullptr);
+		WideCharToMultiByte(CP_UTF8, 0, value, -1, buf.data(), len, nullptr, nullptr);
 		return std::string(buf.data());
 #else
 		return value ? std::string(value) : std::string();
@@ -140,18 +137,15 @@ void JoypadInputManager::RefreshDevices()
 	};
 
 	auto query_registry_tstring = [](HKEY root, const TCHAR *subkey,
-					 const TCHAR *value)
-		-> std::basic_string<TCHAR> {
+					 const TCHAR *value) -> std::basic_string<TCHAR> {
 		HKEY key = nullptr;
-		if (RegOpenKeyEx(root, subkey, 0, KEY_READ, &key) !=
-		    ERROR_SUCCESS) {
+		if (RegOpenKeyEx(root, subkey, 0, KEY_READ, &key) != ERROR_SUCCESS) {
 			return std::basic_string<TCHAR>();
 		}
 
 		DWORD type = 0;
 		DWORD size = 0;
-		if (RegQueryValueEx(key, value, nullptr, &type, nullptr,
-				    &size) != ERROR_SUCCESS ||
+		if (RegQueryValueEx(key, value, nullptr, &type, nullptr, &size) != ERROR_SUCCESS ||
 		    (type != REG_SZ && type != REG_EXPAND_SZ) || size == 0) {
 			RegCloseKey(key);
 			return std::basic_string<TCHAR>();
@@ -159,9 +153,7 @@ void JoypadInputManager::RefreshDevices()
 
 		std::vector<TCHAR> buffer(size / sizeof(TCHAR) + 1, 0);
 		DWORD buf_size = (DWORD)(buffer.size() * sizeof(TCHAR));
-		if (RegQueryValueEx(key, value, nullptr, &type,
-				    (LPBYTE)buffer.data(),
-				    &buf_size) != ERROR_SUCCESS) {
+		if (RegQueryValueEx(key, value, nullptr, &type, (LPBYTE)buffer.data(), &buf_size) != ERROR_SUCCESS) {
 			RegCloseKey(key);
 			return std::basic_string<TCHAR>();
 		}
@@ -170,8 +162,7 @@ void JoypadInputManager::RefreshDevices()
 		return std::basic_string<TCHAR>(buffer.data());
 	};
 
-	auto get_joy_friendly_name = [&](const JOYCAPS &caps,
-					 UINT id) -> std::string {
+	auto get_joy_friendly_name = [&](const JOYCAPS &caps, UINT id) -> std::string {
 		TCHAR settings_path[MAX_PATH];
 		_stprintf_s(
 			settings_path,
@@ -180,11 +171,9 @@ void JoypadInputManager::RefreshDevices()
 		TCHAR value_name[64];
 		_stprintf_s(value_name, TEXT("Joystick%uOEMName"), id + 1);
 
-		auto key_name = query_registry_tstring(
-			HKEY_CURRENT_USER, settings_path, value_name);
+		auto key_name = query_registry_tstring(HKEY_CURRENT_USER, settings_path, value_name);
 		if (key_name.empty()) {
-			key_name = query_registry_tstring(
-				HKEY_LOCAL_MACHINE, settings_path, value_name);
+			key_name = query_registry_tstring(HKEY_LOCAL_MACHINE, settings_path, value_name);
 		}
 
 		if (key_name.empty() && caps.szRegKey[0]) {
@@ -199,11 +188,9 @@ void JoypadInputManager::RefreshDevices()
 			TEXT("System\\CurrentControlSet\\Control\\MediaProperties\\PrivateProperties\\Joystick\\OEM\\") +
 			key_name;
 
-		auto name = query_registry_tstring(
-			HKEY_CURRENT_USER, oem_path.c_str(), TEXT("OEMName"));
+		auto name = query_registry_tstring(HKEY_CURRENT_USER, oem_path.c_str(), TEXT("OEMName"));
 		if (name.empty()) {
-			name = query_registry_tstring(
-				HKEY_LOCAL_MACHINE, oem_path.c_str(), TEXT("OEMName"));
+			name = query_registry_tstring(HKEY_LOCAL_MACHINE, oem_path.c_str(), TEXT("OEMName"));
 		}
 		return to_utf8(name.c_str());
 	};
@@ -256,11 +243,8 @@ void JoypadInputManager::RefreshDevices()
 	auto is_xinput_like = [](const std::string &name) -> bool {
 		std::string lower = name;
 		std::transform(lower.begin(), lower.end(), lower.begin(),
-			       [](unsigned char c) {
-				       return (char)std::tolower(c);
-			       });
-		return lower.find("xinput") != std::string::npos ||
-		       lower.find("xbox") != std::string::npos;
+			       [](unsigned char c) { return (char)std::tolower(c); });
+		return lower.find("xinput") != std::string::npos || lower.find("xbox") != std::string::npos;
 	};
 
 	UINT count = joyGetNumDevs();
@@ -285,9 +269,9 @@ void JoypadInputManager::RefreshDevices()
 				state.axis_initialized[k] = false;
 			}
 			std::string friendly = get_joy_friendly_name(caps, id);
-				if (!friendly.empty()) {
-					state.name = friendly;
-				}
+			if (!friendly.empty()) {
+				state.name = friendly;
+			}
 		}
 		state.axis_min[0] = caps.wXmin;
 		state.axis_max[0] = caps.wXmax;
@@ -336,8 +320,7 @@ void JoypadInputManager::RefreshDevices()
 			}
 			char name[128] = {};
 			if (ioctl(fd, JSIOCGNAME(sizeof(name)), name) < 0) {
-				snprintf(name, sizeof(name), "Joystick %s",
-					 ent->d_name);
+				snprintf(name, sizeof(name), "Joystick %s", ent->d_name);
 			}
 			state.fd = fd;
 			state.id = id;
@@ -379,15 +362,13 @@ void JoypadInputManager::RefreshDevices()
 	device_states_ = std::move(next_states);
 }
 
-void JoypadInputManager::SetOnButtonPressed(
-	std::function<void(const JoypadEvent &)> handler)
+void JoypadInputManager::SetOnButtonPressed(std::function<void(const JoypadEvent &)> handler)
 {
 	std::lock_guard<std::mutex> lock(handler_mutex_);
 	on_button_pressed_ = std::move(handler);
 }
 
-void JoypadInputManager::SetOnAxisChanged(
-	std::function<void(const JoypadEvent &)> handler)
+void JoypadInputManager::SetOnAxisChanged(std::function<void(const JoypadEvent &)> handler)
 {
 	std::lock_guard<std::mutex> lock(handler_mutex_);
 	axis_handlers_.clear();
@@ -399,8 +380,7 @@ void JoypadInputManager::SetOnAxisChanged(
 	}
 }
 
-int JoypadInputManager::AddOnAxisChanged(
-	std::function<void(const JoypadEvent &)> handler)
+int JoypadInputManager::AddOnAxisChanged(std::function<void(const JoypadEvent &)> handler)
 {
 	if (!handler) {
 		return 0;
@@ -420,15 +400,11 @@ void JoypadInputManager::RemoveOnAxisChanged(int handler_id)
 	}
 	std::lock_guard<std::mutex> lock(handler_mutex_);
 	auto it = std::remove_if(axis_handlers_.begin(), axis_handlers_.end(),
-				 [handler_id](const AxisHandlerEntry &entry) {
-					 return entry.id == handler_id;
-				 });
+				 [handler_id](const AxisHandlerEntry &entry) { return entry.id == handler_id; });
 	axis_handlers_.erase(it, axis_handlers_.end());
 }
 
-bool JoypadInputManager::GetAxisRawValue(const std::string &device_id,
-					 int axis_index,
-					 double &raw_out) const
+bool JoypadInputManager::GetAxisRawValue(const std::string &device_id, int axis_index, double &raw_out) const
 {
 	if (axis_index < 0 || axis_index >= 8) {
 		return false;
@@ -447,8 +423,7 @@ bool JoypadInputManager::GetAxisRawValue(const std::string &device_id,
 	return false;
 }
 
-bool JoypadInputManager::BeginLearn(
-	std::function<void(const JoypadEvent &)> handler)
+bool JoypadInputManager::BeginLearn(std::function<void(const JoypadEvent &)> handler)
 {
 	std::lock_guard<std::mutex> lock(handler_mutex_);
 	if (learn_handler_) {
@@ -476,85 +451,54 @@ void JoypadInputManager::PollLoop()
 			for (auto &state : device_states_) {
 				if (state.is_xinput) {
 					XINPUT_STATE xi_state = {};
-					if (XInputGetState((DWORD)state.xinput_id,
-							   &xi_state) !=
-					    ERROR_SUCCESS) {
+					if (XInputGetState((DWORD)state.xinput_id, &xi_state) != ERROR_SUCCESS) {
 						state.connected = false;
 						continue;
 					}
 					state.connected = true;
-					uint32_t buttons =
-						(uint32_t)xi_state.Gamepad.wButtons;
-					uint32_t changed =
-						buttons & ~state.last_buttons;
+					uint32_t buttons = (uint32_t)xi_state.Gamepad.wButtons;
+					uint32_t changed = buttons & ~state.last_buttons;
 					if (changed) {
-						for (int bit = 0; bit < 16;
-						     ++bit) {
-							if (changed &
-							    (1u << bit)) {
+						for (int bit = 0; bit < 16; ++bit) {
+							if (changed & (1u << bit)) {
 								JoypadEvent event;
-								event.device_id =
-									state.id;
-								event.device_name =
-									state.name;
-								event.button =
-									bit + 1;
-								DispatchEvent(
-									event);
+								event.device_id = state.id;
+								event.device_name = state.name;
+								event.button = bit + 1;
+								DispatchEvent(event);
 							}
 						}
 					}
 					state.last_buttons = buttons;
 
-					auto push_axis =
-						[this, &state, default_interval_ms](
-							int axis_index,
-							double value) {
-							std::string key =
-								state.id + ":" +
-								std::to_string(
-									axis_index) +
-								(value >= 0.0 ? "+" :
-										     "-");
-							auto now =
-								std::chrono::steady_clock::now();
-							auto it =
-								axis_last_trigger_.find(
-									key);
-							double prev_raw =
-								state.last_axes
-									[axis_index];
-							double raw = value;
-							if (raw == prev_raw) {
-								return;
-							}
-							if (it !=
-								    axis_last_trigger_
-									    .end() &&
-							    std::chrono::duration_cast<
-								    std::chrono::milliseconds>(
-								    now -
-								    it->second)
-								    .count() <
-							    default_interval_ms) {
-								state.last_axes
-									[axis_index] =
-										raw;
-								return;
-							}
-							axis_last_trigger_[key] = now;
-							JoypadEvent event;
-							event.device_id = state.id;
-							event.device_name =
-								state.name;
-							event.is_axis = true;
-							event.axis_index =
-								axis_index;
-							event.axis_value = value;
-							DispatchEvent(event);
-							state.last_axes[axis_index] =
-								raw;
-						};
+					auto push_axis = [this, &state, default_interval_ms](int axis_index,
+											     double value) {
+						std::string key = state.id + ":" + std::to_string(axis_index) +
+								  (value >= 0.0 ? "+" : "-");
+						auto now = std::chrono::steady_clock::now();
+						auto it = axis_last_trigger_.find(key);
+						double prev_raw = state.last_axes[axis_index];
+						double raw = value;
+						if (raw == prev_raw) {
+							return;
+						}
+						if (it != axis_last_trigger_.end() &&
+						    std::chrono::duration_cast<std::chrono::milliseconds>(now -
+													  it->second)
+								    .count() < default_interval_ms) {
+							state.last_axes[axis_index] = raw;
+							return;
+						}
+						axis_last_trigger_[key] = now;
+						JoypadEvent event;
+						event.device_id = state.id;
+						event.device_name = state.name;
+						event.is_axis = true;
+						event.axis_index = axis_index;
+						event.axis_value = value;
+						DispatchEvent(event);
+						state.last_axes[axis_index] = raw;
+					};
 
 					auto norm_thumb = [](SHORT v) {
 						double out = 0.0;
@@ -563,16 +507,13 @@ void JoypadInputManager::PollLoop()
 						} else {
 							out = v / 32768.0;
 						}
-						return std::clamp(out, -1.0,
-								  1.0);
+						return std::clamp(out, -1.0, 1.0);
 					};
 					auto norm_trigger = [](BYTE v) {
-						return std::clamp(
-							v / 255.0, 0.0, 1.0);
+						return std::clamp(v / 255.0, 0.0, 1.0);
 					};
 
-					auto emit_axis = [&](int idx, double norm,
-							     double raw) {
+					auto emit_axis = [&](int idx, double norm, double raw) {
 						JoypadEvent event;
 						event.device_id = state.id;
 						event.device_name = state.name;
@@ -583,83 +524,52 @@ void JoypadInputManager::PollLoop()
 						DispatchAxisAbsolute(event);
 					};
 
-					auto push_axis_raw =
-						[this, &state, default_interval_ms,
-						 emit_axis](int axis_index,
-							    double norm,
-							    double raw) {
-							std::string key =
-								state.id + ":" +
-								std::to_string(
-									axis_index) +
-								(raw >= 0.0 ? "+" :
-										  "-");
-							auto now =
-								std::chrono::steady_clock::now();
-							auto it =
-								axis_last_trigger_.find(
-									key);
-							if (!state.axis_initialized[axis_index]) {
-								state.last_axes[axis_index] =
-									raw;
-								state.axis_initialized[axis_index] =
-									true;
-								return;
-							}
-							double prev_raw =
-								state.last_axes
-									[axis_index];
-							if (raw == prev_raw) {
-								return;
-							}
-							if (it !=
-								    axis_last_trigger_
-									    .end() &&
-							    std::chrono::duration_cast<
-								    std::chrono::milliseconds>(
-								    now -
-								    it->second)
-								    .count() <
-							    default_interval_ms) {
-								state.last_axes
-									[axis_index] =
-										raw;
-								return;
-							}
-							axis_last_trigger_[key] = now;
-							emit_axis(axis_index, norm, raw);
-							state.last_axes[axis_index] =
-								raw;
-						};
+					auto push_axis_raw = [this, &state, default_interval_ms,
+							      emit_axis](int axis_index, double norm, double raw) {
+						std::string key = state.id + ":" + std::to_string(axis_index) +
+								  (raw >= 0.0 ? "+" : "-");
+						auto now = std::chrono::steady_clock::now();
+						auto it = axis_last_trigger_.find(key);
+						if (!state.axis_initialized[axis_index]) {
+							state.last_axes[axis_index] = raw;
+							state.axis_initialized[axis_index] = true;
+							return;
+						}
+						double prev_raw = state.last_axes[axis_index];
+						if (raw == prev_raw) {
+							return;
+						}
+						if (it != axis_last_trigger_.end() &&
+						    std::chrono::duration_cast<std::chrono::milliseconds>(now -
+													  it->second)
+								    .count() < default_interval_ms) {
+							state.last_axes[axis_index] = raw;
+							return;
+						}
+						axis_last_trigger_[key] = now;
+						emit_axis(axis_index, norm, raw);
+						state.last_axes[axis_index] = raw;
+					};
 
-					push_axis_raw(0,
-						      norm_thumb(xi_state.Gamepad.sThumbLX),
+					push_axis_raw(0, norm_thumb(xi_state.Gamepad.sThumbLX),
 						      (double)xi_state.Gamepad.sThumbLX);
-					push_axis_raw(1,
-						      norm_thumb(xi_state.Gamepad.sThumbLY),
+					push_axis_raw(1, norm_thumb(xi_state.Gamepad.sThumbLY),
 						      (double)xi_state.Gamepad.sThumbLY);
-					push_axis_raw(2,
-						      norm_thumb(xi_state.Gamepad.sThumbRX),
+					push_axis_raw(2, norm_thumb(xi_state.Gamepad.sThumbRX),
 						      (double)xi_state.Gamepad.sThumbRX);
-					push_axis_raw(3,
-						      norm_thumb(xi_state.Gamepad.sThumbRY),
+					push_axis_raw(3, norm_thumb(xi_state.Gamepad.sThumbRY),
 						      (double)xi_state.Gamepad.sThumbRY);
-					push_axis_raw(4,
-						      norm_trigger(xi_state.Gamepad.bLeftTrigger),
+					push_axis_raw(4, norm_trigger(xi_state.Gamepad.bLeftTrigger),
 						      (double)xi_state.Gamepad.bLeftTrigger);
-					push_axis_raw(5,
-						      norm_trigger(xi_state.Gamepad.bRightTrigger),
+					push_axis_raw(5, norm_trigger(xi_state.Gamepad.bRightTrigger),
 						      (double)xi_state.Gamepad.bRightTrigger);
 					continue;
 				}
 				JOYINFOEX info = {};
 				info.dwSize = sizeof(info);
-				info.dwFlags = JOY_RETURNBUTTONS | JOY_RETURNX |
-					       JOY_RETURNY | JOY_RETURNZ |
-					       JOY_RETURNR | JOY_RETURNU |
-					       JOY_RETURNV;
-				MMRESULT res =
-					joyGetPosEx((UINT)state.winmm_id, &info);
+				info.dwFlags = JOY_RETURNBUTTONS | JOY_RETURNX | JOY_RETURNY | JOY_RETURNZ |
+					       JOY_RETURNR | JOY_RETURNU | JOY_RETURNV;
+				MMRESULT res = joyGetPosEx((UINT)state.winmm_id, &info);
 				if (res != JOYERR_NOERROR) {
 					state.connected = false;
 					continue;
@@ -687,21 +597,13 @@ void JoypadInputManager::PollLoop()
 					if (maxv <= minv) {
 						return 0.0;
 					}
-					double out =
-						((double)val - minv) /
-							(double)(maxv - minv) *
-							2.0 -
-						1.0;
+					double out = ((double)val - minv) / (double)(maxv - minv) * 2.0 - 1.0;
 					return std::clamp(out, -1.0, 1.0);
 				};
 
-				double axes[6] = {
-					norm_axis(0, info.dwXpos),
-					norm_axis(1, info.dwYpos),
-					norm_axis(2, info.dwZpos),
-					norm_axis(3, info.dwRpos),
-					norm_axis(4, info.dwUpos),
-					norm_axis(5, info.dwVpos)};
+				double axes[6] = {norm_axis(0, info.dwXpos), norm_axis(1, info.dwYpos),
+						  norm_axis(2, info.dwZpos), norm_axis(3, info.dwRpos),
+						  norm_axis(4, info.dwUpos), norm_axis(5, info.dwVpos)};
 
 				for (int i = 0; i < 6; ++i) {
 					double value = axes[i];
@@ -726,14 +628,9 @@ void JoypadInputManager::PollLoop()
 						raw = info.dwVpos;
 						break;
 					}
-					std::string key =
-						state.id + ":" +
-						std::to_string(i) +
-						(raw >= 0.0 ? "+" : "-");
-					auto now =
-						std::chrono::steady_clock::now();
-					auto it =
-						axis_last_trigger_.find(key);
+					std::string key = state.id + ":" + std::to_string(i) + (raw >= 0.0 ? "+" : "-");
+					auto now = std::chrono::steady_clock::now();
+					auto it = axis_last_trigger_.find(key);
 					if (!state.axis_initialized[i]) {
 						state.last_axes[i] = raw;
 						state.axis_initialized[i] = true;
@@ -744,11 +641,8 @@ void JoypadInputManager::PollLoop()
 						continue;
 					}
 					if (it != axis_last_trigger_.end() &&
-					    std::chrono::duration_cast<
-						    std::chrono::milliseconds>(
-						    now - it->second)
-							    .count() <
-						    default_interval_ms) {
+					    std::chrono::duration_cast<std::chrono::milliseconds>(now - it->second)
+							    .count() < default_interval_ms) {
 						state.last_axes[i] = raw;
 						continue;
 					}
@@ -774,13 +668,11 @@ void JoypadInputManager::PollLoop()
 					continue;
 				}
 				js_event e = {};
-				while (read(state.fd, &e, sizeof(e)) ==
-				       (ssize_t)sizeof(e)) {
+				while (read(state.fd, &e, sizeof(e)) == (ssize_t)sizeof(e)) {
 					if (e.type & JS_EVENT_INIT) {
 						continue;
 					}
-					if ((e.type & JS_EVENT_BUTTON) != 0 &&
-					    e.value) {
+					if ((e.type & JS_EVENT_BUTTON) != 0 && e.value) {
 						JoypadEvent event;
 						event.device_id = state.id;
 						event.device_name = state.name;
@@ -788,8 +680,7 @@ void JoypadInputManager::PollLoop()
 						DispatchEvent(event);
 					}
 					if ((e.type & JS_EVENT_AXIS) != 0) {
-						double value = (double)e.value /
-							       32767.0;
+						double value = (double)e.value / 32767.0;
 						double raw = (double)e.value;
 						if (value < -1.0) {
 							value = -1.0;
@@ -797,34 +688,24 @@ void JoypadInputManager::PollLoop()
 						if (value > 1.0) {
 							value = 1.0;
 						}
-						std::string key =
-							state.id + ":" +
-							std::to_string(e.number) +
-							(value >= 0.0 ? "+" : "-");
-						auto now =
-							std::chrono::steady_clock::now();
-						auto it =
-							axis_last_trigger_.find(
-								key);
+						std::string key = state.id + ":" + std::to_string(e.number) +
+								  (value >= 0.0 ? "+" : "-");
+						auto now = std::chrono::steady_clock::now();
+						auto it = axis_last_trigger_.find(key);
 						if (!state.axis_initialized[e.number]) {
 							state.last_axes[e.number] = raw;
-							state.axis_initialized[e.number] =
-								true;
+							state.axis_initialized[e.number] = true;
 							continue;
 						}
-						double prev =
-							state.last_axes[e.number];
+						double prev = state.last_axes[e.number];
 						if (raw == prev) {
 							continue;
 						}
 						if (it != axis_last_trigger_.end() &&
-						    std::chrono::duration_cast<
-							    std::chrono::milliseconds>(
-							    now - it->second)
-								    .count() <
-							    default_interval_ms) {
-							state.last_axes[e.number] =
-								raw;
+						    std::chrono::duration_cast<std::chrono::milliseconds>(now -
+													  it->second)
+								    .count() < default_interval_ms) {
+							state.last_axes[e.number] = raw;
 							continue;
 						}
 						axis_last_trigger_[key] = now;
@@ -844,75 +725,40 @@ void JoypadInputManager::PollLoop()
 #elif defined(__APPLE__)
 		// macOS uses a CFRunLoop in this thread.
 		if (!hid_manager_) {
-			hid_manager_ = IOHIDManagerCreate(
-				kCFAllocatorDefault, kIOHIDOptionsTypeNone);
+			hid_manager_ = IOHIDManagerCreate(kCFAllocatorDefault, kIOHIDOptionsTypeNone);
 			if (hid_manager_) {
-				IOHIDManagerSetDeviceMatching(
-					(IOHIDManagerRef)hid_manager_,
-					nullptr);
+				IOHIDManagerSetDeviceMatching((IOHIDManagerRef)hid_manager_, nullptr);
 				IOHIDManagerRegisterDeviceMatchingCallback(
 					(IOHIDManagerRef)hid_manager_,
-					[](void *context, IOReturn, void *,
-					   IOHIDDeviceRef device) {
-						auto *self =
-							static_cast<
-								JoypadInputManager *>(
-								context);
+					[](void *context, IOReturn, void *, IOHIDDeviceRef device) {
+						auto *self = static_cast<JoypadInputManager *>(context);
 						if (!self || !device) {
 							return;
 						}
-						CFStringRef name_ref =
-							(CFStringRef)
-								IOHIDDeviceGetProperty(
-									device,
-									CFSTR(
-										kIOHIDProductKey));
+						CFStringRef name_ref = (CFStringRef)IOHIDDeviceGetProperty(
+							device, CFSTR(kIOHIDProductKey));
 						char name[256] = "Gamepad";
 						if (name_ref) {
-							CFStringGetCString(
-								name_ref, name,
-								sizeof(name),
-								kCFStringEncodingUTF8);
+							CFStringGetCString(name_ref, name, sizeof(name),
+									   kCFStringEncodingUTF8);
 						}
 						CFTypeRef vendor =
-							IOHIDDeviceGetProperty(
-								device,
-								CFSTR(
-									kIOHIDVendorIDKey));
+							IOHIDDeviceGetProperty(device, CFSTR(kIOHIDVendorIDKey));
 						CFTypeRef product =
-							IOHIDDeviceGetProperty(
-								device,
-								CFSTR(
-									kIOHIDProductIDKey));
+							IOHIDDeviceGetProperty(device, CFSTR(kIOHIDProductIDKey));
 						int vid = 0;
 						int pid = 0;
-						if (vendor &&
-						    CFGetTypeID(vendor) ==
-							    CFNumberGetTypeID()) {
-							CFNumberGetValue(
-								(CFNumberRef)
-									vendor,
-								kCFNumberIntType,
-								&vid);
+						if (vendor && CFGetTypeID(vendor) == CFNumberGetTypeID()) {
+							CFNumberGetValue((CFNumberRef)vendor, kCFNumberIntType, &vid);
 						}
-						if (product &&
-						    CFGetTypeID(product) ==
-							    CFNumberGetTypeID()) {
-							CFNumberGetValue(
-								(CFNumberRef)
-									product,
-								kCFNumberIntType,
-								&pid);
+						if (product && CFGetTypeID(product) == CFNumberGetTypeID()) {
+							CFNumberGetValue((CFNumberRef)product, kCFNumberIntType, &pid);
 						}
 
-						std::lock_guard<std::mutex>
-							lock(self->devices_mutex_);
+						std::lock_guard<std::mutex> lock(self->devices_mutex_);
 						JoypadDeviceInfo info;
 						info.name = name;
-						info.id = "hid:" +
-							  std::to_string(vid) +
-							  ":" +
-							  std::to_string(pid);
+						info.id = "hid:" + std::to_string(vid) + ":" + std::to_string(pid);
 						self->devices_.push_back(info);
 
 						DeviceState state;
@@ -920,68 +766,44 @@ void JoypadInputManager::PollLoop()
 						state.name = info.name;
 						state.hid_device = device;
 						state.connected = true;
-						self->device_states_.push_back(
-							state);
+						self->device_states_.push_back(state);
 					},
 					this);
 
 				IOHIDManagerRegisterInputValueCallback(
 					(IOHIDManagerRef)hid_manager_,
-					[](void *context, IOReturn, void *,
-					   IOHIDValueRef value) {
-						auto *self =
-							static_cast<
-								JoypadInputManager *>(
-								context);
+					[](void *context, IOReturn, void *, IOHIDValueRef value) {
+						auto *self = static_cast<JoypadInputManager *>(context);
 						if (!self || !value) {
 							return;
 						}
-						IOHIDElementRef element =
-							IOHIDValueGetElement(
-								value);
+						IOHIDElementRef element = IOHIDValueGetElement(value);
 						if (!element) {
 							return;
 						}
-						uint32_t usage_page =
-							IOHIDElementGetUsagePage(
-								element);
-						uint32_t usage =
-							IOHIDElementGetUsage(
-								element);
-						if (usage_page ==
-						    kHIDPage_Button) {
-							CFIndex v =
-								IOHIDValueGetIntegerValue(
-									value);
+						uint32_t usage_page = IOHIDElementGetUsagePage(element);
+						uint32_t usage = IOHIDElementGetUsage(element);
+						if (usage_page == kHIDPage_Button) {
+							CFIndex v = IOHIDValueGetIntegerValue(value);
 							if (v == 0) {
 								return;
 							}
-						} else if (usage_page !=
-							   kHIDPage_GenericDesktop) {
+						} else if (usage_page != kHIDPage_GenericDesktop) {
 							return;
 						}
-						IOHIDDeviceRef device =
-							IOHIDElementGetDevice(
-								element);
+						IOHIDDeviceRef device = IOHIDElementGetDevice(element);
 						if (!device) {
 							return;
 						}
 
 						std::string device_id;
-						std::string device_name =
-							"Gamepad";
+						std::string device_name = "Gamepad";
 						{
-							std::lock_guard<
-								std::mutex>
-								lock(self->devices_mutex_);
-							for (const auto &state :
-							     self->device_states_) {
-								if (state.hid_device ==
-								    device) {
-									device_id =
-										state.id;
-									device_name =
-										state.name;
+							std::lock_guard<std::mutex> lock(self->devices_mutex_);
+							for (const auto &state : self->device_states_) {
+								if (state.hid_device == device) {
+									device_id = state.id;
+									device_name = state.name;
 									break;
 								}
 							}
@@ -990,49 +812,31 @@ void JoypadInputManager::PollLoop()
 						JoypadEvent event;
 						event.device_id = device_id;
 						event.device_name = device_name;
-						if (usage_page ==
-						    kHIDPage_Button) {
+						if (usage_page == kHIDPage_Button) {
 							event.button = (int)usage;
 							self->DispatchEvent(event);
 							return;
 						}
 
-						if (usage != kHIDUsage_GD_X &&
-						    usage != kHIDUsage_GD_Y &&
-						    usage != kHIDUsage_GD_Z &&
-						    usage != kHIDUsage_GD_Rx &&
-						    usage != kHIDUsage_GD_Ry &&
-						    usage != kHIDUsage_GD_Rz &&
-						    usage != kHIDUsage_GD_Slider &&
-						    usage != kHIDUsage_GD_Dial &&
+						if (usage != kHIDUsage_GD_X && usage != kHIDUsage_GD_Y &&
+						    usage != kHIDUsage_GD_Z && usage != kHIDUsage_GD_Rx &&
+						    usage != kHIDUsage_GD_Ry && usage != kHIDUsage_GD_Rz &&
+						    usage != kHIDUsage_GD_Slider && usage != kHIDUsage_GD_Dial &&
 						    usage != kHIDUsage_GD_Wheel) {
 							return;
 						}
 
 						double scaled =
-							IOHIDValueGetScaledValue(
-								value,
-								kIOHIDValueScaleTypeCalibrated);
+							IOHIDValueGetScaledValue(value, kIOHIDValueScaleTypeCalibrated);
 						double raw = (double)IOHIDValueGetIntegerValue(value);
-						IOHIDElementRef el =
-							IOHIDValueGetElement(
-								value);
-						CFIndex min =
-							IOHIDElementGetLogicalMin(
-								el);
-						CFIndex max =
-							IOHIDElementGetLogicalMax(
-								el);
+						IOHIDElementRef el = IOHIDValueGetElement(value);
+						CFIndex min = IOHIDElementGetLogicalMin(el);
+						CFIndex max = IOHIDElementGetLogicalMax(el);
 						double norm = 0.0;
 						if (max > min) {
-							norm = (scaled - min) /
-								       (double)(max -
-										min) *
-								       2.0 -
-							       1.0;
+							norm = (scaled - min) / (double)(max - min) * 2.0 - 1.0;
 						}
-						norm = std::clamp(norm, -1.0,
-								  1.0);
+						norm = std::clamp(norm, -1.0, 1.0);
 
 						int axis_index = 0;
 						switch (usage) {
@@ -1066,38 +870,28 @@ void JoypadInputManager::PollLoop()
 						}
 
 						const int interval_ms = 0;
-						std::string key =
-							device_id + ":" +
-							std::to_string(axis_index) +
-							(raw >= 0.0 ? "+" : "-");
-						auto now =
-							std::chrono::steady_clock::now();
-						auto it =
-							self->axis_last_trigger_
-								.find(key);
+						std::string key = device_id + ":" + std::to_string(axis_index) +
+								  (raw >= 0.0 ? "+" : "-");
+						auto now = std::chrono::steady_clock::now();
+						auto it = self->axis_last_trigger_.find(key);
 						double prev = 0.0;
 						bool init_only = false;
 						{
-							std::lock_guard<
-								std::mutex>
-								lock(self->devices_mutex_);
-							for (auto &state :
-							     self->device_states_) {
-								if (state.hid_device ==
-								    device) {
-									if (axis_index >= 0 &&
-									    axis_index < 8) {
-										if (!state.axis_initialized
-											     [axis_index]) {
+							std::lock_guard<std::mutex> lock(self->devices_mutex_);
+							for (auto &state : self->device_states_) {
+								if (state.hid_device == device) {
+									if (axis_index >= 0 && axis_index < 8) {
+										if (!state.axis_initialized[axis_index]) {
 											state.axis_initialized
-												[axis_index] =
-												true;
+												[axis_index] = true;
 											state.last_axes[axis_index] =
 												raw;
 											init_only = true;
 										} else {
-											prev = state.last_axes[axis_index];
-											state.last_axes[axis_index] = raw;
+											prev = state.last_axes
+												       [axis_index];
+											state.last_axes[axis_index] =
+												raw;
 										}
 									}
 									break;
@@ -1111,11 +905,9 @@ void JoypadInputManager::PollLoop()
 							return;
 						}
 						if (it != self->axis_last_trigger_.end() &&
-						    std::chrono::duration_cast<
-							    std::chrono::milliseconds>(
-							    now - it->second)
-								    .count() <
-							    interval_ms) {
+						    std::chrono::duration_cast<std::chrono::milliseconds>(now -
+													  it->second)
+								    .count() < interval_ms) {
 							return;
 						}
 						self->axis_last_trigger_[key] = now;
@@ -1128,13 +920,9 @@ void JoypadInputManager::PollLoop()
 					},
 					this);
 
-				IOHIDManagerScheduleWithRunLoop(
-					(IOHIDManagerRef)hid_manager_,
-					CFRunLoopGetCurrent(),
-					kCFRunLoopDefaultMode);
-				IOHIDManagerOpen(
-					(IOHIDManagerRef)hid_manager_,
-					kIOHIDOptionsTypeNone);
+				IOHIDManagerScheduleWithRunLoop((IOHIDManagerRef)hid_manager_, CFRunLoopGetCurrent(),
+								kCFRunLoopDefaultMode);
+				IOHIDManagerOpen((IOHIDManagerRef)hid_manager_, kIOHIDOptionsTypeNone);
 				hid_run_loop_ = CFRunLoopGetCurrent();
 			}
 		}

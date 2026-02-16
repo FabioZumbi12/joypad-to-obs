@@ -12,6 +12,8 @@
 #  - git add --chmod=+x *
 #  Build:
 #  - cmake --build build_x64 --config RelWithDebInfo --target joypad-to-obs
+#  Check formats:
+#  - pre-commit run --all-files --show-diff-on-failure
 cmake_minimum_required(VERSION 3.28...3.30)
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/common/bootstrap.cmake" NO_POLICY_SCOPE)
@@ -87,8 +89,7 @@ if(WIN32)
       TARGET ${_name}
       POST_BUILD
       COMMAND ${CMAKE_COMMAND} -E echo "Executando Inno Setup como ${_name}..."
-      COMMAND "${INNO_SETUP_COMPILER}" "${CMAKE_SOURCE_DIR}/setup.iss"
-              "/DBuildConfig=$<CONFIG>" ${INNO_ARGS}
+      COMMAND "${INNO_SETUP_COMPILER}" "${CMAKE_SOURCE_DIR}/setup.iss" "/DBuildConfig=$<CONFIG>" ${INNO_ARGS}
       WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
       COMMENT "Criando instalador ${_name}-Setup.exe (opcional)..."
     )
@@ -97,4 +98,6 @@ if(WIN32)
   endif()
 endif()
 
-set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME ${_name})
+set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME
+                                                              ${_name}
+)

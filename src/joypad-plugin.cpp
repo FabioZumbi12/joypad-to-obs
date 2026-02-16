@@ -68,8 +68,7 @@ double MapRawToPercentWithGamma(const JoypadBinding &binding, double raw)
 	percent = std::clamp(percent, 0.0, 100.0);
 	double base = percent / 100.0;
 	base = std::clamp(base, 0.0, 1.0);
-	double gamma =
-		binding.slider_gamma > 0.0 ? binding.slider_gamma : 0.6;
+	double gamma = binding.slider_gamma > 0.0 ? binding.slider_gamma : 0.6;
 	gamma = std::clamp(gamma, 0.1, 50.0);
 	double curved = std::pow(base, gamma);
 	return std::clamp(curved * 100.0, 0.0, 100.0);
@@ -82,8 +81,7 @@ void ApplyStoredAxisValues()
 		if (!binding_ref.enabled) {
 			continue;
 		}
-		if (binding_ref.action !=
-			    JoypadActionType::SetSourceVolumePercent ||
+		if (binding_ref.action != JoypadActionType::SetSourceVolumePercent ||
 		    binding_ref.input_type != JoypadInputType::Axis) {
 			continue;
 		}
@@ -93,8 +91,7 @@ void ApplyStoredAxisValues()
 			continue;
 		}
 		JoypadBinding adjusted = binding_ref;
-		adjusted.volume_value =
-			MapRawToPercentWithGamma(binding_ref, stored_raw);
+		adjusted.volume_value = MapRawToPercentWithGamma(binding_ref, stored_raw);
 		g_actions.Execute(adjusted);
 	}
 }
@@ -111,9 +108,7 @@ static void save_hotkeys(obs_data_t *save_data, bool saving, void *private_data)
 	(void)private_data;
 	g_config.Save();
 	if (g_dialog) {
-		QMetaObject::invokeMethod(g_dialog, []() {
-			g_dialog->RefreshProfiles();
-		}, Qt::QueuedConnection);
+		QMetaObject::invokeMethod(g_dialog, []() { g_dialog->RefreshProfiles(); }, Qt::QueuedConnection);
 	}
 }
 } // namespace
@@ -138,15 +133,12 @@ bool obs_module_load(void)
 		if (matches.empty()) {
 			return;
 		}
-		obs_log(LOG_INFO, "axis raw: device=%s axis=%d value=%.3f",
-			event.device_name.c_str(), event.axis_index,
+		obs_log(LOG_INFO, "axis raw: device=%s axis=%d value=%.3f", event.device_name.c_str(), event.axis_index,
 			event.axis_raw_value);
 		for (const auto &binding : matches) {
 			g_actions.Execute(binding);
-			if (binding.action ==
-			    JoypadActionType::SetSourceVolumePercent) {
-				g_config.SetAxisLastRaw(MakeAxisKey(binding),
-							event.axis_raw_value);
+			if (binding.action == JoypadActionType::SetSourceVolumePercent) {
+				g_config.SetAxisLastRaw(MakeAxisKey(binding), event.axis_raw_value);
 			}
 		}
 	});
@@ -156,14 +148,11 @@ bool obs_module_load(void)
 	obs_frontend_add_save_callback(save_hotkeys, nullptr);
 
 	g_tools_action = reinterpret_cast<QAction *>(
-		obs_frontend_add_tools_menu_qaction(
-			obs_module_text("JoypadToOBS.MenuTitle")));
+		obs_frontend_add_tools_menu_qaction(obs_module_text("JoypadToOBS.MenuTitle")));
 	QObject::connect(g_tools_action, &QAction::triggered, []() {
 		if (!g_dialog) {
-			auto *parent = reinterpret_cast<QWidget *>(
-				obs_frontend_get_main_window());
-			g_dialog = new JoypadToolsDialog(
-				parent, &g_config, &g_input);
+			auto *parent = reinterpret_cast<QWidget *>(obs_frontend_get_main_window());
+			g_dialog = new JoypadToolsDialog(parent, &g_config, &g_input);
 		}
 		g_dialog->show();
 		g_dialog->raise();

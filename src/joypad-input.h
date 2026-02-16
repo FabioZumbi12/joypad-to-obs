@@ -48,8 +48,7 @@ public:
 	void SetOnAxisChanged(std::function<void(const JoypadEvent &)> handler);
 	int AddOnAxisChanged(std::function<void(const JoypadEvent &)> handler);
 	void RemoveOnAxisChanged(int handler_id);
-	bool GetAxisRawValue(const std::string &device_id, int axis_index,
-			     double &raw_out) const;
+	bool GetAxisRawValue(const std::string &device_id, int axis_index, double &raw_out) const;
 
 	bool BeginLearn(std::function<void(const JoypadEvent &)> handler);
 	void CancelLearn();
@@ -96,8 +95,7 @@ private:
 	};
 	int next_axis_handler_id_ = 1;
 	std::vector<AxisHandlerEntry> axis_handlers_;
-	std::unordered_map<std::string, std::chrono::steady_clock::time_point>
-		axis_last_trigger_;
+	std::unordered_map<std::string, std::chrono::steady_clock::time_point> axis_last_trigger_;
 
 #if defined(__APPLE__)
 	void *hid_manager_ = nullptr;

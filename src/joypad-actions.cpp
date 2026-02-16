@@ -54,8 +54,7 @@ obs_source_t *get_scene_source(const JoypadBinding &binding)
 	return nullptr;
 }
 
-void release_scene_source(obs_source_t *scene_source,
-			  const JoypadBinding &binding)
+void release_scene_source(obs_source_t *scene_source, const JoypadBinding &binding)
 {
 	if (!scene_source) {
 		return;
@@ -64,8 +63,7 @@ void release_scene_source(obs_source_t *scene_source,
 	(void)binding;
 }
 
-obs_sceneitem_t *get_scene_item_from_binding(const JoypadBinding &binding,
-					     obs_source_t **scene_source_out)
+obs_sceneitem_t *get_scene_item_from_binding(const JoypadBinding &binding, obs_source_t **scene_source_out)
 {
 	obs_source_t *scene_source = get_scene_source(binding);
 	if (!scene_source) {
@@ -78,8 +76,7 @@ obs_sceneitem_t *get_scene_item_from_binding(const JoypadBinding &binding,
 		return nullptr;
 	}
 
-	obs_sceneitem_t *item =
-		obs_scene_find_source(scene, binding.source_name.c_str());
+	obs_sceneitem_t *item = obs_scene_find_source(scene, binding.source_name.c_str());
 	if (!item) {
 		release_scene_source(scene_source, binding);
 		return nullptr;
@@ -103,8 +100,7 @@ void JoypadActionEngine::Execute(const JoypadBinding &binding)
 		if (binding.scene_name.empty()) {
 			return;
 		}
-		obs_source_t *scene =
-			obs_get_source_by_name(binding.scene_name.c_str());
+		obs_source_t *scene = obs_get_source_by_name(binding.scene_name.c_str());
 		if (!scene) {
 			return;
 		}
@@ -119,17 +115,14 @@ void JoypadActionEngine::Execute(const JoypadBinding &binding)
 		}
 
 		obs_source_t *scene_source = nullptr;
-		obs_sceneitem_t *item =
-			get_scene_item_from_binding(binding, &scene_source);
+		obs_sceneitem_t *item = get_scene_item_from_binding(binding, &scene_source);
 		if (!item) {
 			return;
 		}
 
 		bool visible = obs_sceneitem_visible(item);
-		bool new_visible = (binding.action ==
-				    JoypadActionType::ToggleSourceVisibility)
-					   ? !visible
-					   : binding.bool_value;
+		bool new_visible = (binding.action == JoypadActionType::ToggleSourceVisibility) ? !visible
+												: binding.bool_value;
 		obs_sceneitem_set_visible(item, new_visible);
 		release_scene_source(scene_source, binding);
 		break;
@@ -139,16 +132,12 @@ void JoypadActionEngine::Execute(const JoypadBinding &binding)
 		if (binding.source_name.empty()) {
 			return;
 		}
-		obs_source_t *source =
-			obs_get_source_by_name(binding.source_name.c_str());
+		obs_source_t *source = obs_get_source_by_name(binding.source_name.c_str());
 		if (!source) {
 			return;
 		}
 		bool muted = obs_source_muted(source);
-		bool new_muted =
-			(binding.action == JoypadActionType::ToggleSourceMute)
-				? !muted
-				: binding.bool_value;
+		bool new_muted = (binding.action == JoypadActionType::ToggleSourceMute) ? !muted : binding.bool_value;
 		obs_source_set_muted(source, new_muted);
 		obs_source_release(source);
 		break;
@@ -157,8 +146,7 @@ void JoypadActionEngine::Execute(const JoypadBinding &binding)
 		if (binding.source_name.empty()) {
 			return;
 		}
-		obs_source_t *source =
-			obs_get_source_by_name(binding.source_name.c_str());
+		obs_source_t *source = obs_get_source_by_name(binding.source_name.c_str());
 		if (!source) {
 			return;
 		}
@@ -180,8 +168,7 @@ void JoypadActionEngine::Execute(const JoypadBinding &binding)
 		if (binding.source_name.empty()) {
 			return;
 		}
-		obs_source_t *source =
-			obs_get_source_by_name(binding.source_name.c_str());
+		obs_source_t *source = obs_get_source_by_name(binding.source_name.c_str());
 		if (!source) {
 			return;
 		}
@@ -207,8 +194,7 @@ void JoypadActionEngine::Execute(const JoypadBinding &binding)
 		if (binding.source_name.empty()) {
 			return;
 		}
-		obs_source_t *source =
-			obs_get_source_by_name(binding.source_name.c_str());
+		obs_source_t *source = obs_get_source_by_name(binding.source_name.c_str());
 		if (!source) {
 			return;
 		}
@@ -238,22 +224,18 @@ void JoypadActionEngine::Execute(const JoypadBinding &binding)
 		if (binding.source_name.empty()) {
 			return;
 		}
-		obs_source_t *source =
-			obs_get_source_by_name(binding.source_name.c_str());
+		obs_source_t *source = obs_get_source_by_name(binding.source_name.c_str());
 		if (!source) {
 			return;
 		}
 
 		switch (binding.action) {
-		case JoypadActionType::MediaPlayPause:
-		{
-			enum obs_media_state state =
-				obs_source_media_get_state(source);
+		case JoypadActionType::MediaPlayPause: {
+			enum obs_media_state state = obs_source_media_get_state(source);
 			bool pause = (state == OBS_MEDIA_STATE_PLAYING);
 			obs_source_media_play_pause(source, pause);
 			break;
-		}
-			break;
+		} break;
 		case JoypadActionType::MediaRestart:
 			obs_source_media_restart(source);
 			break;
@@ -272,22 +254,18 @@ void JoypadActionEngine::Execute(const JoypadBinding &binding)
 		if (binding.source_name.empty() || binding.filter_name.empty()) {
 			return;
 		}
-		obs_source_t *source =
-			obs_get_source_by_name(binding.source_name.c_str());
+		obs_source_t *source = obs_get_source_by_name(binding.source_name.c_str());
 		if (!source) {
 			return;
 		}
-		obs_source_t *filter = obs_source_get_filter_by_name(
-			source, binding.filter_name.c_str());
+		obs_source_t *filter = obs_source_get_filter_by_name(source, binding.filter_name.c_str());
 		if (!filter) {
 			obs_source_release(source);
 			return;
 		}
 		bool enabled = obs_source_enabled(filter);
-		bool new_enabled =
-			(binding.action == JoypadActionType::ToggleFilterEnabled)
-				? !enabled
-				: binding.bool_value;
+		bool new_enabled = (binding.action == JoypadActionType::ToggleFilterEnabled) ? !enabled
+											     : binding.bool_value;
 		obs_source_set_enabled(filter, new_enabled);
 		obs_source_release(filter);
 		obs_source_release(source);
@@ -333,11 +311,9 @@ void JoypadActionEngine::Execute(const JoypadBinding &binding)
 			}
 			if (new_index < scenes.sources.num) {
 				if (obs_frontend_preview_program_mode_active()) {
-					obs_frontend_set_current_preview_scene(
-						scenes.sources.array[new_index]);
+					obs_frontend_set_current_preview_scene(scenes.sources.array[new_index]);
 				} else {
-					obs_frontend_set_current_scene(
-						scenes.sources.array[new_index]);
+					obs_frontend_set_current_scene(scenes.sources.array[new_index]);
 				}
 			}
 		}
@@ -369,8 +345,7 @@ void JoypadActionEngine::Execute(const JoypadBinding &binding)
 		break;
 	case JoypadActionType::ToggleStudioMode:
 		QMetaObject::invokeMethod(QCoreApplication::instance(), []() {
-			obs_frontend_set_preview_program_mode(
-				!obs_frontend_preview_program_mode_active());
+			obs_frontend_set_preview_program_mode(!obs_frontend_preview_program_mode_active());
 		});
 		break;
 	case JoypadActionType::TransitionToProgram:

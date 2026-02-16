@@ -130,6 +130,8 @@ public:
 	bool ExportProfile(int index, const std::string &filepath);
 	bool ImportProfile(const std::string &filepath);
 	std::string GetProfileHotkeyString(int index) const;
+	std::string GetLastFilePath() const;
+	void SetLastFilePath(const std::string &path);
 
 private:
 	std::vector<JoypadProfile> profiles_;
@@ -137,5 +139,6 @@ private:
 	mutable std::mutex mutex_;
 	mutable std::unordered_map<std::string, bool> axis_active_;
 	std::unordered_map<std::string, double> axis_last_raw_;
+	std::string last_file_path_;
 	void SortAndRegisterHotkeys(std::unique_lock<std::mutex> &lock);
 };

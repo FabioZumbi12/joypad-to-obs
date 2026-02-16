@@ -31,8 +31,7 @@ class QTimer;
 
 class JoypadToolsDialog : public QDialog {
 public:
-	JoypadToolsDialog(QWidget *parent, JoypadConfigStore *config,
-			  JoypadInputManager *input);
+	JoypadToolsDialog(QWidget *parent, JoypadConfigStore *config, JoypadInputManager *input);
 	~JoypadToolsDialog();
 
 	void RefreshBindings();
