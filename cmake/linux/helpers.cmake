@@ -17,7 +17,6 @@ function(set_target_properties_plugin target)
     list(POP_FRONT _STPO_PROPERTIES key value)
     set_property(TARGET ${target} PROPERTY ${key} "${value}")
   endwhile()
-
   set_target_properties(
     ${target}
     PROPERTIES VERSION ${PLUGIN_VERSION} SOVERSION ${PLUGIN_VERSION_MAJOR} PREFIX ""
@@ -58,7 +57,8 @@ function(target_install_resources target)
     file(GLOB_RECURSE data_files "${CMAKE_CURRENT_SOURCE_DIR}/data/*")
     foreach(data_file IN LISTS data_files)
       cmake_path(
-        RELATIVE_PATH data_file
+        RELATIVE_PATH
+        data_file
         BASE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/data/"
         OUTPUT_VARIABLE relative_path
       )
