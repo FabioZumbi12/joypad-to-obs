@@ -94,6 +94,11 @@ struct JoypadEvent {
 	double axis_raw_value = 0.0;
 };
 
+struct JoypadProfile {
+	std::string name;
+	std::vector<JoypadBinding> bindings;
+};
+
 class JoypadConfigStore {
 public:
 	void Load();
@@ -102,6 +107,7 @@ public:
 	void AddBinding(const JoypadBinding &binding);
 	void RemoveBinding(size_t index);
 	void UpdateBinding(size_t index, const JoypadBinding &binding);
+	void ClearCurrentProfileBindings();
 
 	std::vector<JoypadBinding> GetBindingsSnapshot() const;
 	std::vector<JoypadBinding> FindMatchingBindings(const JoypadEvent &event) const;
@@ -109,8 +115,20 @@ public:
 	bool ConsumeAxisLastRaw(const std::string &key, double &raw_out);
 	void ClearAxisLastRaw();
 
+	// Profile Management
+	std::vector<std::string> GetProfileNames() const;
+	int GetCurrentProfileIndex() const;
+	void SetCurrentProfile(int index);
+	void AddProfile(const std::string &name);
+	void RenameProfile(int index, const std::string &new_name);
+	void RemoveProfile(int index);
+	void DuplicateProfile(int index, const std::string &new_name);
+	bool ExportProfile(int index, const std::string &filepath);
+	bool ImportProfile(const std::string &filepath);
+
 private:
-	std::vector<JoypadBinding> bindings_;
+	std::vector<JoypadProfile> profiles_;
+	int current_profile_index_ = 0;
 	mutable std::mutex mutex_;
 	mutable std::unordered_map<std::string, bool> axis_active_;
 	std::unordered_map<std::string, double> axis_last_raw_;

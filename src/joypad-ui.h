@@ -26,6 +26,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 class QTableWidget;
 class QPushButton;
 class QLabel;
+class QComboBox;
 
 class JoypadToolsDialog : public QDialog {
 public:
@@ -36,6 +37,7 @@ public:
 	void RefreshBindings();
 
 private:
+	void RefreshProfiles();
 	int SelectedRow() const;
 
 	JoypadConfigStore *config_ = nullptr;
@@ -44,5 +46,7 @@ private:
 	QTableWidget *table_ = nullptr;
 	QPushButton *add_button_ = nullptr;
 	QPushButton *remove_button_ = nullptr;
+	QPushButton *clear_button_ = nullptr;
 	QLabel *axis_live_label_ = nullptr;
+	QComboBox *profile_combo_ = nullptr;
 };

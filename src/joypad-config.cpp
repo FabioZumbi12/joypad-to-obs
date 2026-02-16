@@ -23,6 +23,8 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <algorithm>
 #include <plugin-support.h>
 #include <util/platform.h>
+#include <fstream>
+#include <cctype>
 
 namespace {
 const char *kConfigFileName = "joypad-to-obs.json";
@@ -132,7 +134,8 @@ static void save_binding_to_data(const JoypadBinding &binding, obs_data_t *data)
 void JoypadConfigStore::Load()
 {
 	std::lock_guard<std::mutex> lock(mutex_);
-	bindings_.clear();
+	profiles_.clear();
+	current_profile_index_ = 0;
 	axis_active_.clear();
 	axis_last_raw_.clear();
 
@@ -151,22 +154,56 @@ void JoypadConfigStore::Load()
 		return;
 	}
 
-	obs_data_array_t *bindings_array =
-		obs_data_get_array(data, "bindings");
-	if (bindings_array) {
-		size_t count = obs_data_array_count(bindings_array);
-		bindings_.reserve(count);
+	obs_data_array_t *profiles_array = obs_data_get_array(data, "profiles");
+	if (profiles_array) {
+		size_t count = obs_data_array_count(profiles_array);
 		for (size_t i = 0; i < count; ++i) {
-			obs_data_t *item = obs_data_array_item(bindings_array, i);
-			if (!item) {
-				continue;
+			obs_data_t *p_item =
+				obs_data_array_item(profiles_array, i);
+			JoypadProfile profile;
+			profile.name = obs_data_get_string(p_item, "name");
+			obs_data_array_t *bindings_array =
+				obs_data_get_array(p_item, "bindings");
+			if (bindings_array) {
+				size_t b_count =
+					obs_data_array_count(bindings_array);
+				for (size_t j = 0; j < b_count; ++j) {
+					obs_data_t *b_item =
+						obs_data_array_item(bindings_array,
+								    j);
+					JoypadBinding binding;
+					load_binding_from_data(binding, b_item);
+					profile.bindings.push_back(binding);
+					obs_data_release(b_item);
+				}
+				obs_data_array_release(bindings_array);
 			}
-			JoypadBinding binding;
-			load_binding_from_data(binding, item);
-			bindings_.push_back(binding);
-			obs_data_release(item);
+			profiles_.push_back(profile);
+			obs_data_release(p_item);
 		}
-		obs_data_array_release(bindings_array);
+		obs_data_array_release(profiles_array);
+		current_profile_index_ =
+			(int)obs_data_get_int(data, "current_profile_index");
+	} else {
+		// Legacy migration or new file
+		JoypadProfile default_profile;
+		default_profile.name = "Default";
+		obs_data_array_t *bindings_array =
+			obs_data_get_array(data, "bindings");
+		if (bindings_array) {
+			size_t count = obs_data_array_count(bindings_array);
+			for (size_t i = 0; i < count; ++i) {
+				obs_data_t *item =
+					obs_data_array_item(bindings_array, i);
+				JoypadBinding binding;
+				load_binding_from_data(binding, item);
+				default_profile.bindings.push_back(binding);
+				obs_data_release(item);
+			}
+			obs_data_array_release(bindings_array);
+		}
+		profiles_.push_back(default_profile);
+		current_profile_index_ = 0;
 	}
 
 	obs_data_array_t *axis_array =
@@ -189,6 +226,10 @@ void JoypadConfigStore::Load()
 		obs_data_array_release(axis_array);
 	}
 
+	if (profiles_.empty()) {
+		profiles_.push_back({"Default", {}});
+	}
+
 	obs_data_release(data);
 }
 
@@ -204,17 +245,29 @@ void JoypadConfigStore::Save()
 	}
 
 	obs_data_t *data = obs_data_create();
-	obs_data_array_t *bindings_array = obs_data_array_create();
 
-	for (const auto &binding : bindings_) {
-		obs_data_t *item = obs_data_create();
-		save_binding_to_data(binding, item);
-		obs_data_array_push_back(bindings_array, item);
-		obs_data_release(item);
+	obs_data_array_t *profiles_array = obs_data_array_create();
+	for (const auto &profile : profiles_) {
+		obs_data_t *p_item = obs_data_create();
+		obs_data_set_string(p_item, "name", profile.name.c_str());
+
+		obs_data_array_t *bindings_array = obs_data_array_create();
+		for (const auto &binding : profile.bindings) {
+			obs_data_t *b_item = obs_data_create();
+			save_binding_to_data(binding, b_item);
+			obs_data_array_push_back(bindings_array, b_item);
+			obs_data_release(b_item);
+		}
+		obs_data_set_array(p_item, "bindings", bindings_array);
+		obs_data_array_release(bindings_array);
+
+		obs_data_array_push_back(profiles_array, p_item);
+		obs_data_release(p_item);
 	}
+	obs_data_set_array(data, "profiles", profiles_array);
+	obs_data_array_release(profiles_array);
 
-	obs_data_set_array(data, "bindings", bindings_array);
-	obs_data_array_release(bindings_array);
+	obs_data_set_int(data, "current_profile_index", current_profile_index_);
 
 	obs_data_array_t *axis_array = obs_data_array_create();
 	for (const auto &entry : axis_last_raw_) {
@@ -270,7 +323,10 @@ void JoypadConfigStore::AddBinding(const JoypadBinding &binding)
 {
 	{
 		std::lock_guard<std::mutex> lock(mutex_);
-		bindings_.push_back(binding);
+		if (current_profile_index_ >= 0 &&
+		    current_profile_index_ < (int)profiles_.size()) {
+			profiles_[current_profile_index_].bindings.push_back(binding);
+		}
 	}
 	Save();
 }
@@ -279,10 +335,12 @@ void JoypadConfigStore::RemoveBinding(size_t index)
 {
 	{
 		std::lock_guard<std::mutex> lock(mutex_);
-		if (index >= bindings_.size()) {
-			return;
+		if (current_profile_index_ >= 0 &&
+		    current_profile_index_ < (int)profiles_.size()) {
+			auto &bindings = profiles_[current_profile_index_].bindings;
+			if (index < bindings.size())
+				bindings.erase(bindings.begin() + (ptrdiff_t)index);
 		}
-		bindings_.erase(bindings_.begin() + (ptrdiff_t)index);
 	}
 	Save();
 }
@@ -292,10 +350,24 @@ void JoypadConfigStore::UpdateBinding(size_t index,
 {
 	{
 		std::lock_guard<std::mutex> lock(mutex_);
-		if (index >= bindings_.size()) {
-			return;
+		if (current_profile_index_ >= 0 &&
+		    current_profile_index_ < (int)profiles_.size()) {
+			auto &bindings = profiles_[current_profile_index_].bindings;
+			if (index < bindings.size())
+				bindings[index] = binding;
 		}
-		bindings_[index] = binding;
+	}
+	Save();
+}
+
+void JoypadConfigStore::ClearCurrentProfileBindings()
+{
+	{
+		std::lock_guard<std::mutex> lock(mutex_);
+		if (current_profile_index_ >= 0 &&
+		    current_profile_index_ < (int)profiles_.size()) {
+			profiles_[current_profile_index_].bindings.clear();
+		}
 	}
 	Save();
 }
@@ -303,7 +375,11 @@ void JoypadConfigStore::UpdateBinding(size_t index,
 std::vector<JoypadBinding> JoypadConfigStore::GetBindingsSnapshot() const
 {
 	std::lock_guard<std::mutex> lock(mutex_);
-	return bindings_;
+	if (current_profile_index_ >= 0 &&
+	    current_profile_index_ < (int)profiles_.size()) {
+		return profiles_[current_profile_index_].bindings;
+	}
+	return {};
 }
 
 std::vector<JoypadBinding>
@@ -311,7 +387,12 @@ JoypadConfigStore::FindMatchingBindings(const JoypadEvent &event) const
 {
 	std::vector<JoypadBinding> matches;
 	std::lock_guard<std::mutex> lock(mutex_);
-	for (const auto &binding_ref : bindings_) {
+	if (current_profile_index_ < 0 ||
+	    current_profile_index_ >= (int)profiles_.size()) {
+		return matches;
+	}
+	const auto &current_bindings = profiles_[current_profile_index_].bindings;
+	for (const auto &binding_ref : current_bindings) {
 		JoypadBinding binding = binding_ref;
 		if (!binding.enabled) {
 			continue;
@@ -407,4 +488,166 @@ JoypadConfigStore::FindMatchingBindings(const JoypadEvent &event) const
 		matches.push_back(binding);
 	}
 	return matches;
+}
+
+std::vector<std::string> JoypadConfigStore::GetProfileNames() const
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	std::vector<std::string> names;
+	for (const auto &p : profiles_) {
+		names.push_back(p.name);
+	}
+	return names;
+}
+
+int JoypadConfigStore::GetCurrentProfileIndex() const
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	return current_profile_index_;
+}
+
+void JoypadConfigStore::SetCurrentProfile(int index)
+{
+	{
+		std::lock_guard<std::mutex> lock(mutex_);
+		if (index >= 0 && index < (int)profiles_.size()) {
+			current_profile_index_ = index;
+		}
+	}
+	Save();
+}
+
+void JoypadConfigStore::AddProfile(const std::string &name)
+{
+	{
+		std::lock_guard<std::mutex> lock(mutex_);
+		profiles_.push_back({name, {}});
+		current_profile_index_ = (int)profiles_.size() - 1;
+	}
+	Save();
+}
+
+void JoypadConfigStore::RenameProfile(int index, const std::string &new_name)
+{
+	{
+		std::lock_guard<std::mutex> lock(mutex_);
+		if (index >= 0 && index < (int)profiles_.size()) {
+			profiles_[index].name = new_name;
+		}
+	}
+	Save();
+}
+
+void JoypadConfigStore::RemoveProfile(int index)
+{
+	{
+		std::lock_guard<std::mutex> lock(mutex_);
+		if (profiles_.size() <= 1) {
+			return; // Cannot remove last profile
+		}
+		if (index >= 0 && index < (int)profiles_.size()) {
+			profiles_.erase(profiles_.begin() + index);
+			if (current_profile_index_ >= (int)profiles_.size()) {
+				current_profile_index_ = (int)profiles_.size() - 1;
+			}
+		}
+	}
+	Save();
+}
+
+void JoypadConfigStore::DuplicateProfile(int index, const std::string &new_name)
+{
+	{
+		std::lock_guard<std::mutex> lock(mutex_);
+		if (index >= 0 && index < (int)profiles_.size()) {
+			JoypadProfile new_profile = profiles_[index];
+			new_profile.name = new_name;
+			profiles_.push_back(new_profile);
+			current_profile_index_ = (int)profiles_.size() - 1;
+		}
+	}
+	Save();
+}
+
+bool JoypadConfigStore::ExportProfile(int index, const std::string &filepath)
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	if (index < 0 || index >= (int)profiles_.size()) {
+		return false;
+	}
+	const auto &profile = profiles_[index];
+
+	obs_data_t *root = obs_data_create();
+	obs_data_set_string(root, "profile_name", profile.name.c_str());
+	obs_data_array_t *arr = obs_data_array_create();
+	for (const auto &b : profile.bindings) {
+		obs_data_t *item = obs_data_create();
+		save_binding_to_data(b, item);
+		obs_data_array_push_back(arr, item);
+		obs_data_release(item);
+	}
+	obs_data_set_array(root, "bindings", arr);
+	obs_data_array_release(arr);
+
+	bool success = obs_data_save_json(root, filepath.c_str());
+	obs_data_release(root);
+	return success;
+}
+
+bool JoypadConfigStore::ImportProfile(const std::string &filepath)
+{
+	obs_data_t *root =
+		obs_data_create_from_json_file_safe(filepath.c_str(), "backup");
+	if (!root) {
+		return false;
+	}
+
+	JoypadProfile profile;
+	profile.name = obs_data_get_string(root, "profile_name");
+	if (profile.name.empty()) {
+		profile.name = "Imported";
+	}
+
+	obs_data_array_t *arr = obs_data_get_array(root, "bindings");
+	if (arr) {
+		size_t count = obs_data_array_count(arr);
+		for (size_t i = 0; i < count; ++i) {
+			obs_data_t *item = obs_data_array_item(arr, i);
+			JoypadBinding b;
+			load_binding_from_data(b, item);
+			profile.bindings.push_back(b);
+			obs_data_release(item);
+		}
+		obs_data_array_release(arr);
+	}
+	obs_data_release(root);
+
+	{
+		std::lock_guard<std::mutex> lock(mutex_);
+		std::string base_name = profile.name;
+		int counter = 1;
+		bool collision = true;
+		while (collision) {
+			collision = false;
+			for (const auto &p : profiles_) {
+				if (p.name.size() == profile.name.size() &&
+				    std::equal(p.name.begin(), p.name.end(),
+					       profile.name.begin(),
+					       [](char a, char b) {
+						       return std::tolower((unsigned char)a) ==
+							      std::tolower((unsigned char)b);
+					       })) {
+					collision = true;
+					break;
+				}
+			}
+			if (collision) {
+				profile.name = base_name + " (" + std::to_string(counter++) + ")";
+			}
+		}
+		profiles_.push_back(profile);
+		current_profile_index_ = (int)profiles_.size() - 1;
+	}
+	Save();
+	return true;
 }

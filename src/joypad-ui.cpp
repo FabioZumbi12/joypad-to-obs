@@ -36,6 +36,9 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <QToolButton>
 #include <QLineEdit>
 #include <QMetaObject>
+#include <QInputDialog>
+#include <QMessageBox>
+#include <QFileDialog>
 #include <QPushButton>
 #include <QTableWidget>
 #include <QTableWidgetItem>
@@ -1239,6 +1242,149 @@ JoypadToolsDialog::JoypadToolsDialog(QWidget *parent,
 	description->setWordWrap(true);
 	layout->addWidget(description);
 
+	// Profile Management UI
+	auto *profile_group = new QGroupBox(L("JoypadToOBS.Profile.Group"));
+	auto *profile_layout = new QHBoxLayout(profile_group);
+
+	profile_combo_ = new QComboBox();
+	auto *add_profile_btn = new QToolButton();
+	add_profile_btn->setText("+");
+	add_profile_btn->setToolTip(L("JoypadToOBS.Profile.Add"));
+	auto *rename_profile_btn = new QToolButton();
+	rename_profile_btn->setText("✎");
+	rename_profile_btn->setToolTip(L("JoypadToOBS.Profile.Rename"));
+	auto *duplicate_profile_btn = new QToolButton();
+	duplicate_profile_btn->setText("❐");
+	duplicate_profile_btn->setToolTip(L("JoypadToOBS.Profile.Duplicate"));
+	auto *remove_profile_btn = new QToolButton();
+	remove_profile_btn->setText("-");
+	remove_profile_btn->setToolTip(L("JoypadToOBS.Profile.Remove"));
+	auto *import_profile_btn = new QPushButton(L("JoypadToOBS.Profile.Import"));
+	auto *export_profile_btn = new QPushButton(L("JoypadToOBS.Profile.Export"));
+
+	profile_layout->addWidget(new QLabel(L("JoypadToOBS.Profile.Name")));
+	profile_layout->addWidget(profile_combo_, 1);
+	profile_layout->addWidget(add_profile_btn);
+	profile_layout->addWidget(rename_profile_btn);
+	profile_layout->addWidget(duplicate_profile_btn);
+	profile_layout->addWidget(remove_profile_btn);
+	profile_layout->addWidget(new QFrame); // Spacer
+	profile_layout->addWidget(import_profile_btn);
+	profile_layout->addWidget(export_profile_btn);
+
+	layout->addWidget(profile_group);
+
+	connect(profile_combo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
+		this, [this](int index) {
+			if (index >= 0) {
+				config_->SetCurrentProfile(index);
+				RefreshBindings();
+			}
+		});
+
+	connect(add_profile_btn, &QToolButton::clicked, this, [this]() {
+		bool ok;
+		QString text = QInputDialog::getText(
+			this, L("JoypadToOBS.Profile.Add"),
+			L("JoypadToOBS.Profile.NewName"), QLineEdit::Normal, "", &ok);
+		if (ok) {
+			QString trimmed = text.trimmed();
+			if (trimmed.isEmpty()) {
+				QMessageBox::warning(this, L("JoypadToOBS.Profile.Add"), L("JoypadToOBS.Profile.EmptyName"));
+				return;
+			}
+			auto names = config_->GetProfileNames();
+			for (const auto &name : names) {
+				if (QString::fromStdString(name).compare(trimmed, Qt::CaseInsensitive) == 0) {
+					QMessageBox::warning(this, L("JoypadToOBS.Profile.Add"), L("JoypadToOBS.Profile.NameExists"));
+					return;
+				}
+			}
+			config_->AddProfile(trimmed.toStdString());
+			RefreshProfiles();
+		}
+	});
+
+	connect(rename_profile_btn, &QToolButton::clicked, this, [this]() {
+		int idx = config_->GetCurrentProfileIndex();
+		QString currentName = profile_combo_->currentText();
+		bool ok;
+		QString text = QInputDialog::getText(
+			this, L("JoypadToOBS.Profile.Rename"),
+			L("JoypadToOBS.Profile.NewName"), QLineEdit::Normal,
+			currentName, &ok);
+		if (ok) {
+			QString trimmed = text.trimmed();
+			if (trimmed.isEmpty()) {
+				QMessageBox::warning(this, L("JoypadToOBS.Profile.Rename"), L("JoypadToOBS.Profile.EmptyName"));
+				return;
+			}
+			if (trimmed != currentName) {
+				auto names = config_->GetProfileNames();
+				for (size_t i = 0; i < names.size(); ++i) {
+					if ((int)i == idx)
+						continue;
+					if (QString::fromStdString(names[i]).compare(trimmed, Qt::CaseInsensitive) == 0) {
+						QMessageBox::warning(this, L("JoypadToOBS.Profile.Rename"), L("JoypadToOBS.Profile.NameExists"));
+						return;
+					}
+				}
+				config_->RenameProfile(idx, trimmed.toStdString());
+				RefreshProfiles();
+			}
+		}
+	});
+
+	connect(duplicate_profile_btn, &QToolButton::clicked, this, [this]() {
+		int idx = config_->GetCurrentProfileIndex();
+		QString currentName = profile_combo_->currentText();
+		bool ok;
+		QString text = QInputDialog::getText(
+			this, L("JoypadToOBS.Profile.Duplicate"),
+			L("JoypadToOBS.Profile.NewName"), QLineEdit::Normal,
+			currentName + " - Copy", &ok);
+		if (ok) {
+			QString trimmed = text.trimmed();
+			if (trimmed.isEmpty()) {
+				QMessageBox::warning(this, L("JoypadToOBS.Profile.Duplicate"), L("JoypadToOBS.Profile.EmptyName"));
+				return;
+			}
+			auto names = config_->GetProfileNames();
+			for (const auto &name : names) {
+				if (QString::fromStdString(name).compare(trimmed, Qt::CaseInsensitive) == 0) {
+					QMessageBox::warning(this, L("JoypadToOBS.Profile.Duplicate"), L("JoypadToOBS.Profile.NameExists"));
+					return;
+				}
+			}
+			config_->DuplicateProfile(idx, trimmed.toStdString());
+			RefreshProfiles();
+		}
+	});
+
+	connect(remove_profile_btn, &QToolButton::clicked, this, [this]() {
+		if (profile_combo_->count() <= 1) return;
+		if (QMessageBox::question(this, L("JoypadToOBS.Profile.Remove"),
+			L("JoypadToOBS.Profile.ConfirmRemove")) == QMessageBox::Yes) {
+			config_->RemoveProfile(config_->GetCurrentProfileIndex());
+			RefreshProfiles();
+		}
+	});
+
+	connect(export_profile_btn, &QPushButton::clicked, this, [this]() {
+		QString path = QFileDialog::getSaveFileName(this, L("JoypadToOBS.Profile.Export"), "", "JSON Files (*.json)");
+		if (!path.isEmpty()) {
+			config_->ExportProfile(config_->GetCurrentProfileIndex(), path.toStdString());
+		}
+	});
+
+	connect(import_profile_btn, &QPushButton::clicked, this, [this]() {
+		QString path = QFileDialog::getOpenFileName(this, L("JoypadToOBS.Profile.Import"), "", "JSON Files (*.json)");
+		if (!path.isEmpty()) {
+			config_->ImportProfile(path.toStdString());
+			RefreshProfiles();
+		}
+	});
+
 	table_ = new QTableWidget(this);
 	table_->setColumnCount(9);
 	table_->setHorizontalHeaderLabels(
@@ -1264,6 +1410,8 @@ JoypadToolsDialog::JoypadToolsDialog(QWidget *parent,
 		new QPushButton(L("JoypadToOBS.Button.AddCommand"), this);
 	remove_button_ =
 		new QPushButton(L("JoypadToOBS.Button.Remove"), this);
+	clear_button_ =
+		new QPushButton(L("JoypadToOBS.Button.ClearAll"), this);
 	auto *close_button =
 		new QPushButton(L("JoypadToOBS.Button.Close"), this);
 
@@ -1274,6 +1422,7 @@ JoypadToolsDialog::JoypadToolsDialog(QWidget *parent,
 
 	button_row->addWidget(add_button_);
 	button_row->addWidget(remove_button_);
+	button_row->addWidget(clear_button_);
 	button_row->addStretch();
 	button_row->addWidget(developerLabel);
 	button_row->addWidget(close_button);
@@ -1296,14 +1445,40 @@ JoypadToolsDialog::JoypadToolsDialog(QWidget *parent,
 		}
 	});
 
+	connect(clear_button_, &QPushButton::clicked, this, [this]() {
+		if (QMessageBox::question(this, L("JoypadToOBS.Dialog.ClearAllTitle"),
+					  L("JoypadToOBS.Dialog.ClearAllConfirm")) ==
+		    QMessageBox::Yes) {
+			config_->ClearCurrentProfileBindings();
+			RefreshBindings();
+		}
+	});
+
 	connect(close_button, &QPushButton::clicked, this, &QDialog::close);
 
-	RefreshBindings();
+	RefreshProfiles();
 	table_->resizeColumnsToContents();
 }
 
 JoypadToolsDialog::~JoypadToolsDialog()
 {
+}
+
+void JoypadToolsDialog::RefreshProfiles()
+{
+	profile_combo_->blockSignals(true);
+	profile_combo_->clear();
+	auto names = config_->GetProfileNames();
+	for (const auto &name : names) {
+		profile_combo_->addItem(QString::fromStdString(name));
+	}
+	int current = config_->GetCurrentProfileIndex();
+	if (current >= 0 && current < profile_combo_->count()) {
+		profile_combo_->setCurrentIndex(current);
+	}
+	profile_combo_->blockSignals(false);
+
+	RefreshBindings();
 }
 
 void JoypadToolsDialog::RefreshBindings()
