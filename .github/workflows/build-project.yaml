@@ -19,6 +19,7 @@ jobs:
       config: ${{ steps.setup.outputs.config }}
       commitHash: ${{ steps.setup.outputs.commitHash }}
       pluginName: ${{ steps.setup.outputs.pluginName }}
+      pluginVersion: ${{ steps.setup.outputs.pluginVersion }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -62,14 +63,24 @@ jobs:
           done
           echo "commitHash=${GITHUB_SHA:0:9}" >> $GITHUB_OUTPUT
 
-          plugin_name="$(grep 'name' buildspec.json | sed -E -e 's/^.+"name":[^"]+"(.+)",?$/\1/g')"
-          plugin_display_name="$(grep 'displayName' buildspec.json | sed -E -e 's/^.+"displayName":[^"]+"(.+)",?$/\1/g' || echo "")"
+          plugin_name="$(jq -r '.name' buildspec.json)"
+          plugin_display_name="$(jq -r '.displayName // ""' buildspec.json)"
+          plugin_version="$(jq -r '.version' buildspec.json)"
+
+          if [[ "${GITHUB_REF}" =~ ^refs/tags/ ]]; then
+            tag_version="${GITHUB_REF#refs/tags/}"
+            if [[ "${tag_version}" =~ ^v ]]; then
+              tag_version="${tag_version:1}"
+            fi
+            plugin_version="${tag_version}"
+          fi
 
           if [[ "${plugin_display_name}" ]]; then
             echo "pluginName=${plugin_display_name}" >> $GITHUB_OUTPUT
           else
             echo "pluginName=${plugin_name}" >> $GITHUB_OUTPUT
           fi
+          echo "pluginVersion=${plugin_version}" >> $GITHUB_OUTPUT
 
   macos-build:
     name: Build for macOS 🍏
@@ -103,6 +114,10 @@ jobs:
 
           if (( #remove_formulas )) brew uninstall --ignore-dependencies ${remove_formulas}
           print '::endgroup::'
+
+          # Update buildspec.json with the version from check-event
+          tmp=$(mktemp)
+          jq --arg v "${{ needs.check-event.outputs.pluginVersion }}" '.version = $v' buildspec.json > "$tmp" && mv "$tmp" buildspec.json
 
           local product_name
           local product_version
@@ -197,6 +212,10 @@ jobs:
           : Set Up Environment 🔧
           if [[ "${RUNNER_DEBUG}" ]]; then set -x; fi
 
+          # Update buildspec.json with the version from check-event
+          tmp=$(mktemp)
+          jq --arg v "${{ needs.check-event.outputs.pluginVersion }}" '.version = $v' buildspec.json > "$tmp" && mv "$tmp" buildspec.json
+
           read -r product_name product_version <<< \
             "$(jq -r '. | {name, version} | join(" ")' buildspec.json)"
 
@@ -269,6 +288,10 @@ jobs:
           if ( $Env:RUNNER_DEBUG -ne $null ) {
             Set-PSDebug -Trace 1
           }
+
+          $BuildSpec = Get-Content -Path buildspec.json -Raw | ConvertFrom-Json
+          $BuildSpec.version = "${{ needs.check-event.outputs.pluginVersion }}"
+          $BuildSpec | ConvertTo-Json -Depth 10 | Set-Content buildspec.json
 
           $BuildSpec = Get-Content -Path buildspec.json -Raw | ConvertFrom-Json
           $ProductName = $BuildSpec.name
