@@ -50,6 +50,8 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <QDir>
 #include <QSplitter>
 #include <QCloseEvent>
+#include <QColorDialog>
+#include <QSpinBox>
 
 #include <algorithm>
 #include <cmath>
@@ -287,9 +289,12 @@ QString input_label_from_binding(const JoypadBinding &binding)
 
 class JoypadBindingDialog : public QDialog {
 public:
-	JoypadBindingDialog(QWidget *parent, JoypadInputManager *input, const JoypadBinding *existing = nullptr)
+	JoypadBindingDialog(QWidget *parent, JoypadConfigStore *config, JoypadInputManager *input,
+			    const JoypadBinding *existing = nullptr)
 		: QDialog(parent),
-		  input_(input)
+		  config_(config),
+		  input_(input),
+		  existing_(existing)
 	{
 		setWindowTitle(L("JoypadToOBS.Dialog.AddTitle"));
 		setModal(true);
@@ -886,6 +891,49 @@ private:
 			QMetaObject::invokeMethod(
 				this,
 				[this, event]() {
+					QString conflicts;
+					auto bindings = config_->GetBindingsSnapshot();
+					for (const auto &b : bindings) {
+						bool match = false;
+						if (event.is_axis) {
+							if (b.input_type == JoypadInputType::Axis &&
+							    b.device_id == event.device_id &&
+							    b.axis_index == event.axis_index) {
+								match = true;
+							}
+						} else {
+							if (b.input_type == JoypadInputType::Button &&
+							    b.device_id == event.device_id &&
+							    b.button == event.button) {
+								match = true;
+							}
+						}
+
+						if (match) {
+							if (existing_ && b.uid == existing_->uid) {
+								continue;
+							}
+							QString actionName = action_to_text(b.action);
+							QString target;
+							if (!b.scene_name.empty())
+								target = QString::fromStdString(b.scene_name);
+							else if (!b.source_name.empty())
+								target = QString::fromStdString(b.source_name);
+							conflicts += QString("• %1 (%2)\n").arg(actionName, target);
+						}
+					}
+
+					if (!conflicts.isEmpty()) {
+						QMessageBox::StandardButton reply;
+						reply = QMessageBox::warning(
+							this, L("JoypadToOBS.Dialog.ConflictTitle"),
+							L("JoypadToOBS.Dialog.ConflictMessage").arg(conflicts),
+							QMessageBox::Yes | QMessageBox::No);
+						if (reply == QMessageBox::No) {
+							return;
+						}
+					}
+
 					is_listening_ = false;
 					listen_button_->setText(L("JoypadToOBS.Common.Listen"));
 					learned_event_ = event;
@@ -1050,7 +1098,9 @@ private:
 
 	JoypadActionType CurrentAction() const { return (JoypadActionType)action_combo_->currentData().toInt(); }
 
+	JoypadConfigStore *config_ = nullptr;
 	JoypadInputManager *input_ = nullptr;
+	const JoypadBinding *existing_ = nullptr;
 	JoypadBinding binding_;
 	JoypadEvent learned_event_;
 
@@ -1337,6 +1387,7 @@ JoypadToolsDialog::JoypadToolsDialog(QWidget *parent, JoypadConfigStore *config,
 	add_button_ = new QPushButton(L("JoypadToOBS.Button.AddCommand"), this);
 	remove_button_ = new QPushButton(L("JoypadToOBS.Button.Remove"), this);
 	clear_button_ = new QPushButton(L("JoypadToOBS.Button.ClearAll"), this);
+	auto *osd_button = new QPushButton(L("JoypadToOBS.Button.OSDSettings"), this);
 	save_button_ = new QPushButton(L("JoypadToOBS.Button.Save"), this);
 	save_button_->setEnabled(config_->HasUnsavedChanges());
 	auto *close_button = new QPushButton(L("JoypadToOBS.Button.Close"), this);
@@ -1349,6 +1400,7 @@ JoypadToolsDialog::JoypadToolsDialog(QWidget *parent, JoypadConfigStore *config,
 	button_row->addWidget(add_button_);
 	button_row->addWidget(remove_button_);
 	button_row->addWidget(clear_button_);
+	button_row->addWidget(osd_button);
 	button_row->addStretch();
 	button_row->addWidget(developerLabel);
 	button_row->addWidget(save_button_);
@@ -1357,7 +1409,7 @@ JoypadToolsDialog::JoypadToolsDialog(QWidget *parent, JoypadConfigStore *config,
 	layout->addLayout(button_row);
 
 	connect(add_button_, &QPushButton::clicked, this, [this]() {
-		JoypadBindingDialog dialog(this, input_);
+		JoypadBindingDialog dialog(this, config_, input_);
 		if (dialog.exec() == QDialog::Accepted) {
 			config_->AddBinding(dialog.Binding());
 			RefreshBindings();
@@ -1380,6 +1432,85 @@ JoypadToolsDialog::JoypadToolsDialog(QWidget *parent, JoypadConfigStore *config,
 		}
 	});
 
+	connect(osd_button, &QPushButton::clicked, this, [this]() {
+		QDialog dlg(this);
+		dlg.setWindowTitle(L("JoypadToOBS.Dialog.OSDSettings"));
+		auto *layout = new QVBoxLayout(&dlg);
+
+		auto *chk = new QCheckBox(L("JoypadToOBS.Settings.EnableOSD"), &dlg);
+		chk->setChecked(config_->GetOsdEnabled());
+		layout->addWidget(chk);
+
+		auto *grid = new QGridLayout();
+		grid->addWidget(new QLabel(L("JoypadToOBS.Settings.OSDColor"), &dlg), 0, 0);
+
+		auto *color_btn = new QPushButton(&dlg);
+		QString currentColor = QString::fromStdString(config_->GetOsdColor());
+		color_btn->setStyleSheet(QString("background-color: %1; border: 1px solid #555;").arg(currentColor));
+		grid->addWidget(color_btn, 0, 1);
+
+		auto *bg_color_btn = new QPushButton(&dlg);
+		QString currentBgColor = QString::fromStdString(config_->GetOsdBackgroundColor());
+		bg_color_btn->setStyleSheet(
+			QString("background-color: %1; border: 1px solid #555;").arg(currentBgColor));
+		grid->addWidget(bg_color_btn, 1, 1);
+		grid->addWidget(new QLabel(L("JoypadToOBS.Settings.OSDBgColor"), &dlg), 1, 0);
+		auto *spin = new QSpinBox(&dlg);
+		spin->setRange(8, 100);
+		spin->setValue(config_->GetOsdFontSize());
+		grid->addWidget(spin, 1, 1);
+
+		grid->addWidget(new QLabel(L("JoypadToOBS.Settings.OSDPosition"), &dlg), 2, 0);
+		auto *pos_combo = new QComboBox(&dlg);
+		pos_combo->addItem(L("JoypadToOBS.Position.TopLeft"), (int)JoypadOsdPosition::TopLeft);
+		pos_combo->addItem(L("JoypadToOBS.Position.TopCenter"), (int)JoypadOsdPosition::TopCenter);
+		pos_combo->addItem(L("JoypadToOBS.Position.TopRight"), (int)JoypadOsdPosition::TopRight);
+		pos_combo->addItem(L("JoypadToOBS.Position.CenterLeft"), (int)JoypadOsdPosition::CenterLeft);
+		pos_combo->addItem(L("JoypadToOBS.Position.Center"), (int)JoypadOsdPosition::Center);
+		pos_combo->addItem(L("JoypadToOBS.Position.CenterRight"), (int)JoypadOsdPosition::CenterRight);
+		pos_combo->addItem(L("JoypadToOBS.Position.BottomLeft"), (int)JoypadOsdPosition::BottomLeft);
+		pos_combo->addItem(L("JoypadToOBS.Position.BottomCenter"), (int)JoypadOsdPosition::BottomCenter);
+		pos_combo->addItem(L("JoypadToOBS.Position.BottomRight"), (int)JoypadOsdPosition::BottomRight);
+
+		pos_combo->setCurrentIndex(pos_combo->findData((int)config_->GetOsdPosition()));
+		grid->addWidget(pos_combo, 2, 1);
+
+		layout->addLayout(grid);
+
+		auto *bbox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+		layout->addWidget(bbox);
+
+		connect(bbox, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+		connect(bbox, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+
+		QString selectedBgColor = currentBgColor;
+		QString selectedColor = currentColor;
+
+		connect(color_btn, &QPushButton::clicked, [&]() {
+			QColor c = QColorDialog::getColor(QColor(selectedColor), &dlg);
+			if (c.isValid()) {
+				selectedColor = c.name();
+				color_btn->setStyleSheet(
+					QString("background-color: %1; border: 1px solid #555;").arg(selectedColor));
+			}
+		});
+		connect(bg_color_btn, &QPushButton::clicked, [&]() {
+			QColor c = QColorDialog::getColor(QColor(selectedBgColor), &dlg);
+			if (c.isValid()) {
+				selectedBgColor = c.name();
+				bg_color_btn->setStyleSheet(
+					QString("background-color: %1; border: 1px solid #555;").arg(selectedColor));
+			}
+		});
+
+		if (dlg.exec() == QDialog::Accepted) {
+			config_->SetOsdEnabled(chk->isChecked());
+			config_->SetOsdColor(selectedColor.toStdString());
+			config_->SetOsdPosition((JoypadOsdPosition)pos_combo->currentData().toInt());
+			config_->SetOsdBackgroundColor(selectedBgColor.toStdString());
+		}
+	});
+
 	connect(save_button_, &QPushButton::clicked, this, [this]() { config_->Save(); });
 
 	connect(close_button, &QPushButton::clicked, this, &QDialog::close);
@@ -1391,6 +1522,10 @@ JoypadToolsDialog::JoypadToolsDialog(QWidget *parent, JoypadConfigStore *config,
 			profile_combo_->blockSignals(true);
 			if (actual >= 0 && actual < profile_combo_->count()) {
 				profile_combo_->setCurrentIndex(actual);
+				profile_comment_->blockSignals(true);
+				profile_comment_->setPlainText(
+					QString::fromStdString(config_->GetProfileComment(actual)));
+				profile_comment_->blockSignals(false);
 				RefreshBindings();
 			}
 			profile_combo_->blockSignals(false);
@@ -1480,15 +1615,13 @@ void JoypadToolsDialog::RefreshBindings()
 		std::string device_id = binding.device_id;
 		int button = binding.button;
 		int axis_index = binding.axis_index;
+		int64_t uid = binding.uid;
 
-		connect(chk, &QCheckBox::toggled, this, [this, device_id, button, axis_index](bool checked) {
+		connect(chk, &QCheckBox::toggled, this, [this, uid](bool checked) {
 			auto current = config_->GetBindingsSnapshot();
 			for (size_t i = 0; i < current.size(); ++i) {
-				const auto &b = current[i];
-				if (b.device_id == device_id &&
-				    ((b.input_type == JoypadInputType::Button && b.button == button) ||
-				     (b.input_type == JoypadInputType::Axis && b.axis_index == axis_index))) {
-					JoypadBinding updated = b;
+				if (current[i].uid == uid) {
+					JoypadBinding updated = current[i];
 					updated.enabled = checked;
 					config_->UpdateBinding(i, updated);
 					break;
@@ -1545,57 +1678,35 @@ void JoypadToolsDialog::RefreshBindings()
 		delete_button->setProperty("binding_index", row);
 		table_->setCellWidget(row, 8, delete_button);
 
-		std::string edit_device_id = binding.device_id;
-		int edit_button_input = binding.button;
-		int edit_axis_index = binding.axis_index;
-		JoypadInputType edit_input_type = binding.input_type;
+		connect(edit_button, &QToolButton::clicked, this, [this, uid]() {
+			auto current = config_->GetBindingsSnapshot();
+			size_t target_index = (size_t)-1;
+			for (size_t i = 0; i < current.size(); ++i) {
+				if (current[i].uid == uid) {
+					target_index = i;
+					break;
+				}
+			}
+			if (target_index == (size_t)-1) {
+				return;
+			}
+			JoypadBindingDialog dialog(this, config_, input_, &current[target_index]);
+			if (dialog.exec() == QDialog::Accepted) {
+				config_->UpdateBinding(target_index, dialog.Binding());
+				RefreshBindings();
+			}
+		});
 
-		connect(edit_button, &QToolButton::clicked, this,
-			[this, edit_device_id, edit_button_input, edit_axis_index, edit_input_type]() {
-				auto current = config_->GetBindingsSnapshot();
-				size_t target_index = (size_t)-1;
-				for (size_t i = 0; i < current.size(); ++i) {
-					const auto &b = current[i];
-					if (b.device_id == edit_device_id && b.input_type == edit_input_type &&
-					    ((edit_input_type == JoypadInputType::Button &&
-					      b.button == edit_button_input) ||
-					     (edit_input_type == JoypadInputType::Axis &&
-					      b.axis_index == edit_axis_index))) {
-						target_index = i;
-						break;
-					}
-				}
-				if (target_index == (size_t)-1) {
-					return;
-				}
-				JoypadBindingDialog dialog(this, input_, &current[target_index]);
-				if (dialog.exec() == QDialog::Accepted) {
-					config_->UpdateBinding(target_index, dialog.Binding());
+		connect(delete_button, &QToolButton::clicked, this, [this, uid]() {
+			auto current = config_->GetBindingsSnapshot();
+			for (size_t i = 0; i < current.size(); ++i) {
+				if (current[i].uid == uid) {
+					config_->RemoveBinding(i);
 					RefreshBindings();
+					break;
 				}
-			});
-
-		std::string delete_device_id = binding.device_id;
-		int delete_button_input = binding.button;
-		int delete_axis_index = binding.axis_index;
-		JoypadInputType delete_input_type = binding.input_type;
-
-		connect(delete_button, &QToolButton::clicked, this,
-			[this, delete_device_id, delete_button_input, delete_axis_index, delete_input_type]() {
-				auto current = config_->GetBindingsSnapshot();
-				for (size_t i = 0; i < current.size(); ++i) {
-					const auto &b = current[i];
-					if (b.device_id == delete_device_id && b.input_type == delete_input_type &&
-					    ((delete_input_type == JoypadInputType::Button &&
-					      b.button == delete_button_input) ||
-					     (delete_input_type == JoypadInputType::Axis &&
-					      b.axis_index == delete_axis_index))) {
-						config_->RemoveBinding(i);
-						RefreshBindings();
-						break;
-					}
-				}
-			});
+			}
+		});
 	}
 	table_->resizeColumnsToContents();
 }
@@ -1606,6 +1717,7 @@ int JoypadToolsDialog::SelectedRow() const
 	if (!selection) {
 		return -1;
 	}
+
 	auto rows = selection->selectedRows();
 	if (rows.isEmpty()) {
 		return -1;

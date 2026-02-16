@@ -82,6 +82,7 @@ static void ensure_config_dir()
 
 static void load_binding_from_data(JoypadBinding &binding, obs_data_t *data)
 {
+	binding.uid = obs_data_get_int(data, "uid");
 	binding.device_id = obs_data_get_string(data, "device_id");
 	binding.device_name = obs_data_get_string(data, "device_name");
 	binding.button = (int)obs_data_get_int(data, "button");
@@ -133,6 +134,7 @@ static void load_binding_from_data(JoypadBinding &binding, obs_data_t *data)
 
 static void save_binding_to_data(const JoypadBinding &binding, obs_data_t *data)
 {
+	obs_data_set_int(data, "uid", binding.uid);
 	obs_data_set_string(data, "device_id", binding.device_id.c_str());
 	obs_data_set_string(data, "device_name", binding.device_name.c_str());
 	obs_data_set_int(data, "button", binding.button);
@@ -226,6 +228,85 @@ void JoypadConfigStore::Load()
 		profiles_.push_back({"Default", {}});
 		current_profile_index_ = 0;
 		register_profile_hotkey(this, profiles_[0]);
+
+		if (profiles_[0].hotkey_id != OBS_INVALID_HOTKEY_ID) {
+			obs_data_t *hk_item = obs_data_create();
+			obs_data_set_bool(hk_item, "control", true);
+			obs_data_set_string(hk_item, "key", "OBS_KEY_NUM1");
+
+			obs_data_array_t *hk_array = obs_data_array_create();
+			obs_data_array_push_back(hk_array, hk_item);
+
+			obs_hotkey_load(profiles_[0].hotkey_id, hk_array);
+
+			obs_data_release(hk_item);
+			obs_data_array_release(hk_array);
+		}
+
+#ifdef _WIN32
+		JoypadProfile xbox_profile;
+		xbox_profile.name = "Xbox One Controller";
+		xbox_profile.comment =
+			"!!! EXPAND THIS TEXTBOX !!!\n\nThis template is an example to use with XBOX ONE Controller and OBS Studio Mode.\nThis is the mapped buttons:\n\nB - Enable/Disable OBS Studio Mode\nLB - Select previous Preview scene\nRB - Select next Preview scene\nA - Transition scene from Preview to Program\nControl + Numpad2 - Set this profile active (if other profiles setup)";
+
+		JoypadBinding b1;
+		b1.uid = 1;
+		b1.device_id = "xinput:0";
+		b1.device_name = "Xbox Controller 1";
+		b1.button = 13;
+		b1.input_type = JoypadInputType::Button;
+		b1.action = JoypadActionType::TransitionToProgram;
+		b1.enabled = true;
+		xbox_profile.bindings.push_back(b1);
+
+		JoypadBinding b2;
+		b2.uid = 2;
+		b2.device_id = "xinput:0";
+		b2.device_name = "Xbox Controller 1";
+		b2.button = 10;
+		b2.input_type = JoypadInputType::Button;
+		b2.action = JoypadActionType::NextScene;
+		b2.enabled = true;
+		xbox_profile.bindings.push_back(b2);
+
+		JoypadBinding b3;
+		b3.uid = 3;
+		b3.device_id = "xinput:0";
+		b3.device_name = "Xbox Controller 1";
+		b3.button = 9;
+		b3.input_type = JoypadInputType::Button;
+		b3.action = JoypadActionType::PreviousScene;
+		b3.enabled = true;
+		xbox_profile.bindings.push_back(b3);
+
+		JoypadBinding b4;
+		b4.uid = 4;
+		b4.device_id = "xinput:0";
+		b4.device_name = "Xbox Controller 1";
+		b4.button = 14;
+		b4.input_type = JoypadInputType::Button;
+		b4.action = JoypadActionType::ToggleStudioMode;
+		b4.enabled = true;
+		xbox_profile.bindings.push_back(b4);
+
+		register_profile_hotkey(this, xbox_profile);
+
+		if (xbox_profile.hotkey_id != OBS_INVALID_HOTKEY_ID) {
+			obs_data_t *hk_item = obs_data_create();
+			obs_data_set_bool(hk_item, "control", true);
+			obs_data_set_string(hk_item, "key", "OBS_KEY_NUM2");
+
+			obs_data_array_t *hk_array = obs_data_array_create();
+			obs_data_array_push_back(hk_array, hk_item);
+
+			obs_hotkey_load(xbox_profile.hotkey_id, hk_array);
+
+			obs_data_release(hk_item);
+			obs_data_array_release(hk_array);
+		}
+
+		profiles_.push_back(xbox_profile);
+#endif
 		return;
 	}
 
@@ -290,6 +371,33 @@ void JoypadConfigStore::Load()
 		}
 		profiles_.push_back(default_profile);
 		current_profile_index_ = 0;
+	}
+
+	osd_enabled_ = true;
+	if (obs_data_has_user_value(data, "osd_enabled")) {
+		osd_enabled_ = obs_data_get_bool(data, "osd_enabled");
+	}
+	const char *color = obs_data_get_string(data, "osd_color");
+	osd_color_ = (color && *color) ? color : "#ffffff";
+	osd_font_size_ = (int)obs_data_get_int(data, "osd_font_size");
+	if (osd_font_size_ <= 0)
+		osd_font_size_ = 24;
+	osd_position_ = (JoypadOsdPosition)obs_data_get_int(data, "osd_position");
+	const char *bg_color = obs_data_get_string(data, "osd_background_color");
+	osd_background_color_ = (bg_color && *bg_color) ? bg_color : "rgba(0, 0, 0, 230)";
+
+	for (auto &profile : profiles_) {
+		int64_t max_uid = 0;
+		for (const auto &b : profile.bindings) {
+			if (b.uid > max_uid)
+				max_uid = b.uid;
+		}
+		int64_t local_gen = max_uid + 1;
+		for (auto &binding : profile.bindings) {
+			if (binding.uid == 0) {
+				binding.uid = local_gen++;
+			}
+		}
 	}
 
 	obs_data_array_t *axis_array = obs_data_get_array(data, "axis_last_values");
@@ -399,6 +507,12 @@ void JoypadConfigStore::Save()
 	obs_data_set_array(data, "axis_last_values", axis_array);
 	obs_data_array_release(axis_array);
 
+	obs_data_set_bool(data, "osd_enabled", osd_enabled_);
+	obs_data_set_string(data, "osd_color", osd_color_.c_str());
+	obs_data_set_int(data, "osd_font_size", osd_font_size_);
+	obs_data_set_int(data, "osd_position", (int)osd_position_);
+	obs_data_set_string(data, "osd_background_color", osd_background_color_.c_str());
+
 	if (!obs_data_save_json(data, config_path)) {
 		obs_log(LOG_WARNING, "Nao foi possivel salvar %s", config_path);
 	}
@@ -438,10 +552,18 @@ void JoypadConfigStore::ClearAxisLastRaw()
 	axis_last_raw_.clear();
 }
 
+void JoypadConfigStore::SetProfileSwitchCallback(ProfileSwitchCallback callback)
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	on_profile_switch_ = std::move(callback);
+}
+
 void JoypadConfigStore::SwitchProfileByHotkey(obs_hotkey_id id)
 {
 	bool changed = false;
 	std::string name;
+	ProfileSwitchCallback callback;
+
 	{
 		std::lock_guard<std::mutex> lock(mutex_);
 		for (size_t i = 0; i < profiles_.size(); ++i) {
@@ -450,14 +572,20 @@ void JoypadConfigStore::SwitchProfileByHotkey(obs_hotkey_id id)
 					current_profile_index_ = (int)i;
 					name = profiles_[i].name;
 					changed = true;
+					dirty_ = true;
 				}
 				break;
 			}
 		}
+		if (changed) {
+			callback = on_profile_switch_;
+		}
 	}
 	if (changed) {
-		dirty_ = true;
 		obs_log(LOG_INFO, "Switched to profile '%s' via hotkey", name.c_str());
+		if (callback) {
+			callback(name);
+		}
 	}
 }
 
@@ -536,8 +664,90 @@ void JoypadConfigStore::AddBinding(const JoypadBinding &binding)
 	{
 		std::lock_guard<std::mutex> lock(mutex_);
 		if (current_profile_index_ >= 0 && current_profile_index_ < (int)profiles_.size()) {
-			profiles_[current_profile_index_].bindings.push_back(binding);
+			int64_t max_uid = 0;
+			for (const auto &b : profiles_[current_profile_index_].bindings) {
+				if (b.uid > max_uid)
+					max_uid = b.uid;
+			}
+			JoypadBinding b = binding;
+			b.uid = max_uid + 1;
+			profiles_[current_profile_index_].bindings.push_back(b);
 		}
+	}
+	dirty_ = true;
+}
+
+JoypadOsdPosition JoypadConfigStore::GetOsdPosition() const
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	return osd_position_;
+}
+
+void JoypadConfigStore::SetOsdPosition(JoypadOsdPosition position)
+{
+	{
+		std::lock_guard<std::mutex> lock(mutex_);
+		osd_position_ = position;
+	}
+	dirty_ = true;
+}
+
+bool JoypadConfigStore::GetOsdEnabled() const
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	return osd_enabled_;
+}
+
+void JoypadConfigStore::SetOsdEnabled(bool enabled)
+{
+	{
+		std::lock_guard<std::mutex> lock(mutex_);
+		osd_enabled_ = enabled;
+	}
+	dirty_ = true;
+}
+
+std::string JoypadConfigStore::GetOsdColor() const
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	return osd_color_;
+}
+
+void JoypadConfigStore::SetOsdColor(const std::string &color)
+{
+	{
+		std::lock_guard<std::mutex> lock(mutex_);
+		osd_color_ = color;
+	}
+	dirty_ = true;
+}
+
+int JoypadConfigStore::GetOsdFontSize() const
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	return osd_font_size_;
+}
+
+void JoypadConfigStore::SetOsdFontSize(int size)
+{
+	{
+		std::lock_guard<std::mutex> lock(mutex_);
+		osd_font_size_ = size;
+	}
+	dirty_ = true;
+}
+
+std::string JoypadConfigStore::GetOsdBackgroundColor() const
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	return osd_background_color_;
+}
+
+void JoypadConfigStore::SetOsdBackgroundColor(const std::string &color)
+{
+	{
+		std::lock_guard<std::mutex> lock(mutex_);
+		osd_background_color_ = color;
 	}
 	dirty_ = true;
 }
@@ -879,6 +1089,17 @@ bool JoypadConfigStore::ImportProfile(const std::string &filepath)
 			if (collision) {
 				profile.name = base_name + " (" + std::to_string(counter++) + ")";
 			}
+		}
+
+		int64_t max_uid = 0;
+		for (const auto &b : profile.bindings) {
+			if (b.uid > max_uid)
+				max_uid = b.uid;
+		}
+		int64_t local_gen = max_uid + 1;
+		for (auto &b : profile.bindings) {
+			if (b.uid == 0)
+				b.uid = local_gen++;
 		}
 		profile.hotkey_id = OBS_INVALID_HOTKEY_ID;
 		profiles_.push_back(profile);

@@ -31,6 +31,11 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <chrono>
 #include <cmath>
 #include <QMetaObject>
+#include <QCoreApplication>
+#include <QLabel>
+#include <QTimer>
+#include <QGraphicsOpacityEffect>
+#include <QPropertyAnimation>
 
 OBS_DECLARE_MODULE()
 OBS_MODULE_USE_DEFAULT_LOCALE(PLUGIN_NAME, "en-US")
@@ -118,6 +123,93 @@ bool obs_module_load(void)
 	obs_log(LOG_INFO, "joypad-to-obs loaded (version %s)", PLUGIN_VERSION);
 
 	g_config.Load();
+
+	g_config.SetProfileSwitchCallback([](const std::string &name) {
+		if (!g_config.GetOsdEnabled())
+			return;
+
+		QMetaObject::invokeMethod(QCoreApplication::instance(), [name]() {
+			QWidget *main_window = (QWidget *)obs_frontend_get_main_window();
+			if (!main_window)
+				return;
+
+			QLabel *label = new QLabel(main_window);
+			label->setWindowFlags(Qt::ToolTip | Qt::FramelessWindowHint);
+			label->setAttribute(Qt::WA_TranslucentBackground);
+			label->setAttribute(Qt::WA_ShowWithoutActivating);
+			QString color = QString::fromStdString(g_config.GetOsdColor());
+			int size = g_config.GetOsdFontSize();
+			QString bg_color = QString::fromStdString(g_config.GetOsdBackgroundColor());
+			label->setStyleSheet(QString("QLabel { background-color: %3; color: %1; "
+						     "border-radius: 8px; padding: 12px; font-size: %2px; "
+						     "font-weight: bold; border: 2px solid %1; }")
+						     .arg(color)
+						     .arg(size)
+						     .arg(bg_color));
+			label->setText(QString("Joypad Profile: %1").arg(QString::fromStdString(name)));
+			label->adjustSize();
+
+			QRect r = main_window->geometry();
+			int m = 40; // Margin
+			int x = 0;
+			int y = 0;
+			int w = label->width();
+			int h = label->height();
+
+			switch (g_config.GetOsdPosition()) {
+			case JoypadOsdPosition::TopLeft:
+				x = r.x() + m;
+				y = r.y() + m;
+				break;
+			case JoypadOsdPosition::TopCenter:
+				x = r.x() + (r.width() - w) / 2;
+				y = r.y() + m;
+				break;
+			case JoypadOsdPosition::TopRight:
+				x = r.x() + r.width() - w - m;
+				y = r.y() + m;
+				break;
+			case JoypadOsdPosition::CenterLeft:
+				x = r.x() + m;
+				y = r.y() + (r.height() - h) / 2;
+				break;
+			case JoypadOsdPosition::Center:
+				x = r.x() + (r.width() - w) / 2;
+				y = r.y() + (r.height() - h) / 2;
+				break;
+			case JoypadOsdPosition::CenterRight:
+				x = r.x() + r.width() - w - m;
+				y = r.y() + (r.height() - h) / 2;
+				break;
+			case JoypadOsdPosition::BottomLeft:
+				x = r.x() + m;
+				y = r.y() + r.height() - h - m;
+				break;
+			case JoypadOsdPosition::BottomCenter:
+				x = r.x() + (r.width() - w) / 2;
+				y = r.y() + r.height() - h - m;
+				break;
+			case JoypadOsdPosition::BottomRight:
+				x = r.x() + r.width() - w - m;
+				y = r.y() + r.height() - h - m;
+				break;
+			}
+			label->move(x, y);
+			label->show();
+
+			QTimer::singleShot(2000, label, [label]() {
+				QGraphicsOpacityEffect *eff = new QGraphicsOpacityEffect(label);
+				label->setGraphicsEffect(eff);
+				QPropertyAnimation *a = new QPropertyAnimation(eff, "opacity");
+				a->setDuration(500);
+				a->setStartValue(1);
+				a->setEndValue(0);
+				a->setEasingCurve(QEasingCurve::OutQuad);
+				QObject::connect(a, &QPropertyAnimation::finished, label, &QLabel::deleteLater);
+				a->start(QAbstractAnimation::DeleteWhenStopped);
+			});
+		});
+	});
 
 	g_input.SetOnButtonPressed([](const JoypadEvent &event) {
 		auto matches = g_config.FindMatchingBindings(event);

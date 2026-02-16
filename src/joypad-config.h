@@ -23,6 +23,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <vector>
 #include <unordered_map>
 #include <obs.h>
+#include <functional>
 
 enum class JoypadActionType {
 	SwitchScene = 0,
@@ -58,7 +59,20 @@ enum class JoypadAxisDirection {
 	Positive = 1,
 };
 
+enum class JoypadOsdPosition {
+	TopLeft = 0,
+	TopCenter = 1,
+	TopRight = 2,
+	CenterLeft = 3,
+	Center = 4,
+	CenterRight = 5,
+	BottomLeft = 6,
+	BottomCenter = 7,
+	BottomRight = 8
+};
+
 struct JoypadBinding {
+	int64_t uid = 0;
 	std::string device_id;
 	std::string device_name;
 	int button = -1;
@@ -104,6 +118,9 @@ struct JoypadProfile {
 
 class JoypadConfigStore {
 public:
+	using ProfileSwitchCallback = std::function<void(const std::string &)>;
+	void SetProfileSwitchCallback(ProfileSwitchCallback callback);
+
 	void Load();
 	void Save();
 	void Unload();
@@ -138,6 +155,17 @@ public:
 	std::string GetLastFilePath() const;
 	void SetLastFilePath(const std::string &path);
 
+	bool GetOsdEnabled() const;
+	void SetOsdEnabled(bool enabled);
+	std::string GetOsdColor() const;
+	void SetOsdColor(const std::string &color);
+	int GetOsdFontSize() const;
+	void SetOsdFontSize(int size);
+	JoypadOsdPosition GetOsdPosition() const;
+	void SetOsdPosition(JoypadOsdPosition position);
+	std::string GetOsdBackgroundColor() const;
+	void SetOsdBackgroundColor(const std::string &color);
+
 private:
 	std::vector<JoypadProfile> profiles_;
 	int current_profile_index_ = 0;
@@ -146,5 +174,11 @@ private:
 	mutable std::unordered_map<std::string, bool> axis_active_;
 	std::unordered_map<std::string, double> axis_last_raw_;
 	std::string last_file_path_;
+	ProfileSwitchCallback on_profile_switch_;
+	bool osd_enabled_ = true;
+	std::string osd_color_ = "#ffffff";
+	int osd_font_size_ = 24;
+	JoypadOsdPosition osd_position_ = JoypadOsdPosition::BottomCenter;
+	std::string osd_background_color_ = "rgba(0, 0, 0, 230)";
 	void SortAndRegisterHotkeys(std::unique_lock<std::mutex> &lock);
 };
