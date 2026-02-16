@@ -28,25 +28,32 @@ Joypad to OBS supports a comprehensive set of commands to manage your stream:
 
 ### 🎬 Scenes & Transitions
 *   **Switch Scene:** Instantly cut to a specific scene.
-*   **Navigation:** Cycle through scenes with **Next Scene** and **Previous Scene**.
-*   **Studio Mode:** Toggle Studio Mode on/off.
-*   **Transition:** Trigger the transition from Preview to Program.
+*   **Next Scene** and **Previous Scene:** Cycle through the scene list.
+*   **Toggle Studio Mode:** Turn Studio Mode on/off.
+*   **Transition Preview to Program:** Trigger transition from Preview to Program.
 
 ### 👁️ Sources & Filters
-*   **Visibility:** Toggle or set the visibility (Show/Hide) of any source.
-*   **Filters:** Enable or disable specific filters on sources (perfect for toggling effects like Reverb or Color Correction).
+*   **Toggle Source Visibility:** Toggle visibility (show/hide) for a source.
+*   **Set Source Visibility:** Force source visibility to show or hide.
+*   **Toggle Filter:** Toggle enabled state of a source filter.
+*   **Set Filter:** Force a source filter enabled/disabled state.
 
 ### 🔊 Audio Mixing
-*   **Mute Control:** Toggle or set mute for any audio source.
-*   **Volume Control:** Set specific dB levels or adjust volume incrementally (step up/down).
-*   **Analog Faders:** Map analog sticks or physical sliders to control source volume smoothly. Includes a configurable gamma curve for precise control.
+*   **Toggle Source Mute:** Toggle mute for an audio source.
+*   **Set Source Mute:** Force mute state on/off.
+*   **Set Source Volume:** Set a fixed dB value.
+*   **Adjust Source Volume:** Apply relative volume step up/down.
+*   **Set Source Volume (Slider):** Map axis input to volume percent with configurable gamma curve.
 
 ### ⏯️ Media Playback
-*   **Controls:** **Play/Pause**, **Restart**, and **Stop** media sources.
+*   **Media Play/Pause**
+*   **Media Restart**
+*   **Media Stop**
 
 ### 📡 Output & Tools
-*   **Streaming & Recording:** Start or stop **Streaming** and **Recording**.
-*   **Virtual Camera:** Toggle the **Virtual Camera**.
+*   **Toggle Streaming:** Start/stop streaming.
+*   **Toggle Recording:** Start/stop recording.
+*   **Toggle Virtual Camera:** Start/stop virtual camera.
 
 ## Profile Management
 
@@ -104,3 +111,8 @@ cmake --build . --config Release
 
 ## License
 This plugin is released under the GPLv2 license.
+
+## Support the Project
+
+If Joypad to OBS helps your workflow, consider supporting the project or following my work here:  
+https://linktr.ee/FabioZumbi12
