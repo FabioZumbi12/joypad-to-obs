@@ -1658,9 +1658,6 @@ void JoypadToolsDialog::RefreshBindings()
 		chk_layout->addWidget(chk);
 		table_->setCellWidget(row, 0, chk_widget);
 
-		std::string device_id = binding.device_id;
-		int button = binding.button;
-		int axis_index = binding.axis_index;
 		int64_t uid = binding.uid;
 
 		connect(chk, &QCheckBox::toggled, this, [this, uid](bool checked) {
