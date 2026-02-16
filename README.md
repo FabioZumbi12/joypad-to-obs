@@ -18,15 +18,34 @@ This plugin **does not** provide a visual overlay for your controller. Its purpo
 *   **Broad Device Compatibility:**
     *   **Gamepads:** Works with XInput (Xbox), DirectInput (PlayStation, Logitech), and generic USB controllers.
     *   **Custom Hardware:** Compatible with **Arduino-based devices** that appear as a standard joystick, allowing you to use potentiometers, encoders, and sliders to control OBS.
-*   **Extensive Action List:**
-    *   **Scene Management:** Switch to any scene.
-    *   **Source Control:** Toggle or set the visibility of sources.
-    *   **Audio Control:** Mute/unmute sources, set absolute volume (dB), or adjust volume incrementally.
-    *   **Analog Sliders:** Use an analog stick or a physical slider to control source volume with a configurable response curve (gamma).
-    *   **Filter Control:** Enable or disable filters on any source.
-    *   **Media Source Control:** Play, pause, restart, or stop media sources.
 *   **Intuitive UI:** A dedicated "Tools" menu dialog to create, edit, and manage all your bindings.
 *   **"Learn" Mode:** Simply press a button or move an axis on your controller to assign it to an action.
+
+## Supported Actions
+
+Joypad to OBS supports a comprehensive set of commands to manage your stream:
+
+### 🎬 Scenes & Transitions
+*   **Switch Scene:** Instantly cut to a specific scene.
+*   **Navigation:** Cycle through scenes with **Next Scene** and **Previous Scene**.
+*   **Studio Mode:** Toggle Studio Mode on/off.
+*   **Transition:** Trigger the transition from Preview to Program.
+
+### 👁️ Sources & Filters
+*   **Visibility:** Toggle or set the visibility (Show/Hide) of any source.
+*   **Filters:** Enable or disable specific filters on sources (perfect for toggling effects like Reverb or Color Correction).
+
+### 🔊 Audio Mixing
+*   **Mute Control:** Toggle or set mute for any audio source.
+*   **Volume Control:** Set specific dB levels or adjust volume incrementally (step up/down).
+*   **Analog Faders:** Map analog sticks or physical sliders to control source volume smoothly. Includes a configurable gamma curve for precise control.
+
+### ⏯️ Media Playback
+*   **Controls:** **Play/Pause**, **Restart**, and **Stop** media sources.
+
+### 📡 Output & Tools
+*   **Streaming & Recording:** Start or stop **Streaming** and **Recording**.
+*   **Virtual Camera:** Toggle the **Virtual Camera**.
 
 ## Requirements
 

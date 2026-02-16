@@ -83,6 +83,20 @@ QString action_to_text(JoypadActionType action)
 		return L("JoypadToOBS.Action.ToggleFilter");
 	case JoypadActionType::SetFilterEnabled:
 		return L("JoypadToOBS.Action.SetFilter");
+	case JoypadActionType::NextScene:
+		return L("JoypadToOBS.Action.NextScene");
+	case JoypadActionType::PreviousScene:
+		return L("JoypadToOBS.Action.PreviousScene");
+	case JoypadActionType::ToggleStreaming:
+		return L("JoypadToOBS.Action.ToggleStreaming");
+	case JoypadActionType::ToggleRecording:
+		return L("JoypadToOBS.Action.ToggleRecording");
+	case JoypadActionType::ToggleVirtualCam:
+		return L("JoypadToOBS.Action.ToggleVirtualCam");
+	case JoypadActionType::ToggleStudioMode:
+		return L("JoypadToOBS.Action.ToggleStudioMode");
+	case JoypadActionType::TransitionToProgram:
+		return L("JoypadToOBS.Action.TransitionToProgram");
 	default:
 		return L("JoypadToOBS.Common.Unknown");
 	}
@@ -408,6 +422,12 @@ public:
 		action_combo_->addItem(action_to_text(JoypadActionType::SwitchScene),
 				       (int)JoypadActionType::SwitchScene);
 		action_combo_->addItem(
+			action_to_text(JoypadActionType::NextScene),
+			(int)JoypadActionType::NextScene);
+		action_combo_->addItem(
+			action_to_text(JoypadActionType::PreviousScene),
+			(int)JoypadActionType::PreviousScene);
+		action_combo_->addItem(
 			action_to_text(JoypadActionType::ToggleSourceVisibility),
 			(int)JoypadActionType::ToggleSourceVisibility);
 		action_combo_->addItem(
@@ -442,6 +462,21 @@ public:
 		action_combo_->addItem(
 			action_to_text(JoypadActionType::SetFilterEnabled),
 			(int)JoypadActionType::SetFilterEnabled);
+		action_combo_->addItem(
+			action_to_text(JoypadActionType::ToggleStreaming),
+			(int)JoypadActionType::ToggleStreaming);
+		action_combo_->addItem(
+			action_to_text(JoypadActionType::ToggleRecording),
+			(int)JoypadActionType::ToggleRecording);
+		action_combo_->addItem(
+			action_to_text(JoypadActionType::ToggleVirtualCam),
+			(int)JoypadActionType::ToggleVirtualCam);
+		action_combo_->addItem(
+			action_to_text(JoypadActionType::ToggleStudioMode),
+			(int)JoypadActionType::ToggleStudioMode);
+		action_combo_->addItem(
+			action_to_text(JoypadActionType::TransitionToProgram),
+			(int)JoypadActionType::TransitionToProgram);
 
 		bool_checkbox_ =
 			new QCheckBox(L("JoypadToOBS.Common.Enable"), action_group);

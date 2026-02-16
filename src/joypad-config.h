@@ -37,6 +37,13 @@ enum class JoypadActionType {
 	SetFilterEnabled = 10,
 	AdjustSourceVolume = 11,
 	SetSourceVolumePercent = 12,
+	NextScene = 13,
+	PreviousScene = 14,
+	ToggleStreaming = 15,
+	ToggleRecording = 16,
+	ToggleVirtualCam = 17,
+	ToggleStudioMode = 18,
+	TransitionToProgram = 19,
 };
 
 enum class JoypadInputType {

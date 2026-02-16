@@ -1,4 +1,4 @@
-#  Nightbot SR Plugin for OBS - CMake Build Configuration
+#  Joypad to OBS Plugin for OBS - CMake Build Configuration
 #  This CMake configuration file sets up the build process.
 #  It includes options for enabling the obs-frontend-api and Qt functionalities,
 #  and specifies custom output directories for the built plugin and its associated data.
@@ -10,6 +10,8 @@
 #  - git push origin --tags
 #  For github/scripts folders:
 #  - git add --chmod=+x *
+#  Build:
+#  - cmake --build build_x64 --config RelWithDebInfo --target joypad-to-obs
 cmake_minimum_required(VERSION 3.28...3.30)
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/common/bootstrap.cmake" NO_POLICY_SCOPE)

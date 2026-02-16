@@ -21,6 +21,8 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <obs-frontend-api.h>
 #include <obs-module.h>
 #include <cmath>
+#include <QMetaObject>
+#include <QCoreApplication>
 
 namespace {
 constexpr float kMinDb = -60.0f;
@@ -291,6 +293,93 @@ void JoypadActionEngine::Execute(const JoypadBinding &binding)
 		obs_source_release(source);
 		break;
 	}
+	case JoypadActionType::NextScene:
+	case JoypadActionType::PreviousScene: {
+		obs_source_t *current_scene = nullptr;
+		if (obs_frontend_preview_program_mode_active()) {
+			current_scene = obs_frontend_get_current_preview_scene();
+		} else {
+			current_scene = obs_frontend_get_current_scene();
+		}
+
+		if (!current_scene) {
+			return;
+		}
+
+		obs_frontend_source_list scenes = {};
+		obs_frontend_get_scenes(&scenes);
+
+		size_t current_index = (size_t)-1;
+		for (size_t i = 0; i < scenes.sources.num; ++i) {
+			if (scenes.sources.array[i] == current_scene) {
+				current_index = i;
+				break;
+			}
+		}
+
+		if (current_index != (size_t)-1) {
+			size_t new_index = current_index;
+			if (binding.action == JoypadActionType::NextScene) {
+				new_index++;
+				if (new_index >= scenes.sources.num) {
+					new_index = 0;
+				}
+			} else {
+				if (new_index == 0) {
+					new_index = scenes.sources.num - 1;
+				} else {
+					new_index--;
+				}
+			}
+			if (new_index < scenes.sources.num) {
+				if (obs_frontend_preview_program_mode_active()) {
+					obs_frontend_set_current_preview_scene(
+						scenes.sources.array[new_index]);
+				} else {
+					obs_frontend_set_current_scene(
+						scenes.sources.array[new_index]);
+				}
+			}
+		}
+
+		obs_frontend_source_list_free(&scenes);
+		obs_source_release(current_scene);
+		break;
+	}
+	case JoypadActionType::ToggleStreaming:
+		if (obs_frontend_streaming_active()) {
+			obs_frontend_streaming_stop();
+		} else {
+			obs_frontend_streaming_start();
+		}
+		break;
+	case JoypadActionType::ToggleRecording:
+		if (obs_frontend_recording_active()) {
+			obs_frontend_recording_stop();
+		} else {
+			obs_frontend_recording_start();
+		}
+		break;
+	case JoypadActionType::ToggleVirtualCam:
+		if (obs_frontend_virtualcam_active()) {
+			obs_frontend_stop_virtualcam();
+		} else {
+			obs_frontend_start_virtualcam();
+		}
+		break;
+	case JoypadActionType::ToggleStudioMode:
+		QMetaObject::invokeMethod(QCoreApplication::instance(), []() {
+			obs_frontend_set_preview_program_mode(
+				!obs_frontend_preview_program_mode_active());
+		});
+		break;
+	case JoypadActionType::TransitionToProgram:
+		QMetaObject::invokeMethod(QCoreApplication::instance(), []() {
+			if (obs_frontend_preview_program_mode_active()) {
+				obs_frontend_preview_program_trigger_transition();
+			}
+		});
+		break;
 	default:
 		break;
 	}
