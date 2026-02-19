@@ -22,6 +22,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <cerrno>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -38,6 +39,10 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/hid/IOHIDManager.h>
 #endif
+
+namespace {
+constexpr int kMaxTrackedAxes = 8;
+}
 
 JoypadInputManager::JoypadInputManager() = default;
 
@@ -411,7 +416,7 @@ void JoypadInputManager::RemoveOnAxisChanged(int handler_id)
 
 bool JoypadInputManager::GetAxisRawValue(const std::string &device_id, int axis_index, double &raw_out) const
 {
-	if (axis_index < 0 || axis_index >= 8) {
+	if (axis_index < 0 || axis_index >= kMaxTrackedAxes) {
 		return false;
 	}
 	std::lock_guard<std::mutex> lock(devices_mutex_);
@@ -531,6 +536,9 @@ void JoypadInputManager::PollLoop()
 
 					auto push_axis_raw = [this, &state, default_interval_ms,
 							      emit_axis](int axis_index, double norm, double raw) {
+						if (axis_index < 0 || axis_index >= kMaxTrackedAxes) {
+							return;
+						}
 						std::string key = state.id + ":" + std::to_string(axis_index) +
 								  (raw >= 0.0 ? "+" : "-");
 						auto now = std::chrono::steady_clock::now();
@@ -673,7 +681,8 @@ void JoypadInputManager::PollLoop()
 					continue;
 				}
 				js_event e = {};
-				while (read(state.fd, &e, sizeof(e)) == (ssize_t)sizeof(e)) {
+				ssize_t bytes_read = 0;
+				while ((bytes_read = read(state.fd, &e, sizeof(e))) == (ssize_t)sizeof(e)) {
 					if (e.type & JS_EVENT_INIT) {
 						continue;
 					}
@@ -685,6 +694,10 @@ void JoypadInputManager::PollLoop()
 						DispatchEvent(event);
 					}
 					if ((e.type & JS_EVENT_AXIS) != 0) {
+						const int axis_index = (int)e.number;
+						if (axis_index < 0 || axis_index >= kMaxTrackedAxes) {
+							continue;
+						}
 						double value = (double)e.value / 32767.0;
 						double raw = (double)e.value;
 						if (value < -1.0) {
@@ -693,16 +706,16 @@ void JoypadInputManager::PollLoop()
 						if (value > 1.0) {
 							value = 1.0;
 						}
-						std::string key = state.id + ":" + std::to_string(e.number) +
+						std::string key = state.id + ":" + std::to_string(axis_index) +
 								  (value >= 0.0 ? "+" : "-");
 						auto now = std::chrono::steady_clock::now();
 						auto it = axis_last_trigger_.find(key);
-						if (!state.axis_initialized[e.number]) {
-							state.last_axes[e.number] = raw;
-							state.axis_initialized[e.number] = true;
+						if (!state.axis_initialized[axis_index]) {
+							state.last_axes[axis_index] = raw;
+							state.axis_initialized[axis_index] = true;
 							continue;
 						}
-						double prev = state.last_axes[e.number];
+						double prev = state.last_axes[axis_index];
 						if (raw == prev) {
 							continue;
 						}
@@ -710,7 +723,7 @@ void JoypadInputManager::PollLoop()
 						    std::chrono::duration_cast<std::chrono::milliseconds>(now -
 													  it->second)
 								    .count() < default_interval_ms) {
-							state.last_axes[e.number] = raw;
+							state.last_axes[axis_index] = raw;
 							continue;
 						}
 						axis_last_trigger_[key] = now;
@@ -718,11 +731,18 @@ void JoypadInputManager::PollLoop()
 						event.device_id = state.id;
 						event.device_name = state.name;
 						event.is_axis = true;
-						event.axis_index = e.number;
+						event.axis_index = axis_index;
 						event.axis_value = value;
 						event.axis_raw_value = raw;
 						DispatchAxisAbsolute(event);
-						state.last_axes[e.number] = raw;
+						state.last_axes[axis_index] = raw;
+					}
+				}
+				if (bytes_read < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+					state.connected = false;
+					if (state.fd >= 0) {
+						close(state.fd);
+						state.fd = -1;
 					}
 				}
 			}
@@ -938,6 +958,9 @@ void JoypadInputManager::PollLoop()
 						default:
 							axis_index = 0;
 							break;
+						}
+						if (axis_index < 0 || axis_index >= kMaxTrackedAxes) {
+							return;
 						}
 
 						const int interval_ms = 0;
