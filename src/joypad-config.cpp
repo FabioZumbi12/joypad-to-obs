@@ -103,6 +103,7 @@ static void load_binding_from_data(JoypadBinding &binding, obs_data_t *data)
 	    binding.axis_direction != JoypadAxisDirection::Both) {
 		binding.axis_direction = JoypadAxisDirection::Positive;
 	}
+	binding.axis_inverted = obs_data_get_bool(data, "axis_inverted");
 	binding.axis_threshold = obs_data_get_double(data, "axis_threshold");
 	bool axis_threshold_set = obs_data_get_bool(data, "axis_threshold_set");
 	if (!axis_threshold_set) {
@@ -131,6 +132,10 @@ static void load_binding_from_data(JoypadBinding &binding, obs_data_t *data)
 	binding.volume_value = obs_data_get_double(data, "volume_value");
 	binding.slider_gamma = obs_data_get_double(data, "slider_gamma");
 	if (binding.action == JoypadActionType::SetSourceVolumePercent) {
+		if (!binding.axis_inverted && binding.axis_direction == JoypadAxisDirection::Negative) {
+			binding.axis_inverted = true;
+		}
+		binding.axis_direction = JoypadAxisDirection::Both;
 		if (binding.slider_gamma <= 0.0) {
 			binding.slider_gamma = binding.volume_value > 0.0 ? binding.volume_value : 0.6;
 		}
@@ -154,6 +159,7 @@ static void save_binding_to_data(const JoypadBinding &binding, obs_data_t *data)
 	if (binding.input_type == JoypadInputType::Axis) {
 		obs_data_set_int(data, "axis_index", binding.axis_index);
 		obs_data_set_int(data, "axis_direction", (int)binding.axis_direction);
+		obs_data_set_bool(data, "axis_inverted", binding.axis_inverted);
 		obs_data_set_double(data, "axis_threshold", binding.axis_threshold);
 		obs_data_set_bool(data, "axis_threshold_set", true);
 		obs_data_set_int(data, "axis_interval_ms", binding.axis_interval_ms);
@@ -838,7 +844,7 @@ std::vector<JoypadBinding> JoypadConfigStore::FindMatchingBindings(const JoypadE
 				}
 				const double raw = event.axis_raw_value;
 				double percent = ((raw - minv) / (maxv - minv)) * 100.0;
-				if (binding.axis_direction == JoypadAxisDirection::Negative) {
+				if (binding.axis_inverted || binding.axis_direction == JoypadAxisDirection::Negative) {
 					percent = 100.0 - percent;
 				}
 				if (percent < 0.0) {
@@ -854,7 +860,10 @@ std::vector<JoypadBinding> JoypadConfigStore::FindMatchingBindings(const JoypadE
 				double curved = std::pow(base, gamma);
 				binding.volume_value = std::clamp(curved * 100.0, 0.0, 100.0);
 			}
-			const double value = event.axis_value;
+			double value = event.axis_value;
+			if (binding.axis_inverted) {
+				value = -value;
+			}
 			const double abs_value = std::fabs(value);
 			if (!is_percent_axis && binding.axis_direction != JoypadAxisDirection::Both) {
 				int dir = value >= 0.0 ? 1 : -1;
@@ -866,7 +875,8 @@ std::vector<JoypadBinding> JoypadConfigStore::FindMatchingBindings(const JoypadE
 			const double threshold_on = binding.axis_threshold;
 			const double threshold_off = binding.axis_threshold * 0.4;
 			std::string axis_key = event.device_id + ":" + std::to_string(binding.axis_index) + ":" +
-					       std::to_string((int)binding.axis_direction);
+					       std::to_string((int)binding.axis_direction) + ":" +
+					       (binding.axis_inverted ? "1" : "0");
 			if (!is_percent_axis) {
 				bool active = axis_active_[axis_key];
 				if (!active) {

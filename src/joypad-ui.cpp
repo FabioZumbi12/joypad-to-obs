@@ -527,6 +527,8 @@ public:
 			axis_live_value_label_->setText(L("JoypadToOBS.Common.PercentValue").arg(percent, 0, 'f', 0) +
 							" " + L("JoypadToOBS.Common.DbValue").arg(db, 0, 'f', 1));
 		});
+		connect(volume_allow_above_unity_, &QCheckBox::toggled, this,
+			[this](bool checked) { binding_.allow_above_unity = checked; });
 		connect(source_combo_, &QComboBox::currentIndexChanged, this, &JoypadBindingDialog::ReloadFilters);
 		connect(axis_set_min_button_, &QPushButton::clicked, this, [this]() {
 			binding_.axis_min_value = last_axis_value_;
@@ -746,6 +748,7 @@ private:
 		axis_threshold_label_->setVisible(visible && !hide_axis_options);
 		axis_threshold_combo_->setVisible(visible && !hide_axis_options);
 		axis_both_checkbox_->setVisible(visible && !hide_axis_options);
+		invert_axis_checkbox_->setVisible(visible);
 		axis_min_label_->setVisible(visible && hide_axis_options);
 		axis_max_label_->setVisible(visible && hide_axis_options);
 		axis_set_min_button_->setVisible(visible && hide_axis_options);
@@ -791,6 +794,8 @@ private:
 				axis_threshold_combo_->setCurrentIndex(idx);
 			}
 			axis_both_checkbox_->setChecked(binding.axis_direction == JoypadAxisDirection::Both);
+			invert_axis_checkbox_->setChecked(binding.axis_inverted ||
+							  binding.axis_direction == JoypadAxisDirection::Negative);
 			axis_min_label_->setText(L("JoypadToOBS.Field.AxisMinValue") + ": " +
 						 QString::number(binding.axis_min_value, 'f', 2));
 			axis_max_label_->setText(L("JoypadToOBS.Field.AxisMaxValue") + ": " +
@@ -841,7 +846,6 @@ private:
 		volume_allow_above_unity_->setChecked(binding.allow_above_unity);
 		if (binding.action == JoypadActionType::SetSourceVolumePercent) {
 			volume_spin_->setValue(binding.slider_gamma);
-			invert_axis_checkbox_->setChecked(binding.axis_direction == JoypadAxisDirection::Negative);
 		} else {
 			volume_spin_->setValue(binding.volume_value);
 		}
@@ -921,13 +925,11 @@ private:
 				   (action == JoypadActionType::SetSourceVolumePercent);
 		bool show_above_unity = (action == JoypadActionType::SetSourceVolume) ||
 					(action == JoypadActionType::AdjustSourceVolume);
-		bool show_invert = (action == JoypadActionType::SetSourceVolumePercent);
 
 		bool_checkbox_->setVisible(show_bool);
 		volume_label_->setVisible(show_volume);
 		volume_spin_->setVisible(show_volume);
 		volume_allow_above_unity_->setVisible(show_above_unity);
-		invert_axis_checkbox_->setVisible(show_invert);
 		if (!show_above_unity) {
 			volume_allow_above_unity_->setChecked(false);
 		}
@@ -1104,10 +1106,9 @@ private:
 		if (learned_event_.is_axis) {
 			binding_.input_type = JoypadInputType::Axis;
 			binding_.axis_index = learned_event_.axis_index;
+			binding_.axis_inverted = invert_axis_checkbox_->isChecked();
 			if (CurrentAction() == JoypadActionType::SetSourceVolumePercent) {
-				binding_.axis_direction = invert_axis_checkbox_->isChecked()
-								  ? JoypadAxisDirection::Negative
-								  : JoypadAxisDirection::Both;
+				binding_.axis_direction = JoypadAxisDirection::Both;
 			} else if (axis_both_checkbox_->isChecked()) {
 				binding_.axis_direction = JoypadAxisDirection::Both;
 			} else {
@@ -1122,6 +1123,7 @@ private:
 		} else {
 			binding_.input_type = JoypadInputType::Button;
 			binding_.axis_index = -1;
+			binding_.axis_inverted = false;
 			binding_.axis_threshold = 0.5;
 		}
 
@@ -1148,6 +1150,7 @@ private:
 		// Cleanup unused fields based on action
 		if (binding_.input_type != JoypadInputType::Axis) {
 			binding_.axis_index = -1;
+			binding_.axis_inverted = false;
 			binding_.axis_threshold = 0.5;
 			binding_.axis_min_value = 0.0;
 			binding_.axis_max_value = 1024.0;

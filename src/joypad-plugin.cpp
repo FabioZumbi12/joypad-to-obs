@@ -68,7 +68,7 @@ double MapRawToPercentWithGamma(const JoypadBinding &binding, double raw)
 		maxv = 1024.0;
 	}
 	double percent = ((raw - minv) / (maxv - minv)) * 100.0;
-	if (binding.axis_direction == JoypadAxisDirection::Negative) {
+	if (binding.axis_inverted || binding.axis_direction == JoypadAxisDirection::Negative) {
 		percent = 100.0 - percent;
 	}
 	percent = std::clamp(percent, 0.0, 100.0);

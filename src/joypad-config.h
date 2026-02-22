@@ -82,6 +82,7 @@ struct JoypadBinding {
 	JoypadInputType input_type = JoypadInputType::Button;
 	int axis_index = -1;
 	JoypadAxisDirection axis_direction = JoypadAxisDirection::Positive;
+	bool axis_inverted = false;
 	double axis_threshold = 0.5;
 	int axis_interval_ms = 150;
 	double axis_min_value = 0.0;
