@@ -51,7 +51,7 @@ JoypadToolsDialog *g_dialog = nullptr;
 
 std::string MakeAxisKey(const JoypadBinding &binding)
 {
-	std::string key = binding.device_id;
+	std::string key = binding.device_stable_id.empty() ? binding.device_id : binding.device_stable_id;
 	key += "|";
 	key += binding.source_name;
 	key += "|";

@@ -69,7 +69,7 @@ target_sources(
 )
 
 if(WIN32)
-  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE winmm advapi32 xinput9_1_0)
+  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE winmm advapi32 setupapi hid)
 endif()
 
 if(APPLE)

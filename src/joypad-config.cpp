@@ -86,6 +86,14 @@ static void load_binding_from_data(JoypadBinding &binding, obs_data_t *data)
 {
 	binding.uid = obs_data_get_int(data, "uid");
 	binding.device_id = obs_data_get_string(data, "device_id");
+	binding.device_stable_id = obs_data_get_string(data, "device_stable_id");
+	binding.device_type_id = obs_data_get_string(data, "device_type_id");
+	if (binding.device_stable_id.empty() && binding.device_id.rfind("winmm:", 0) != 0) {
+		binding.device_stable_id = binding.device_id;
+	}
+	if (binding.device_type_id.empty() && binding.device_id.rfind("winmm:", 0) != 0) {
+		binding.device_type_id = binding.device_id;
+	}
 	binding.device_name = obs_data_get_string(data, "device_name");
 	binding.button = (int)obs_data_get_int(data, "button");
 	binding.input_type = (JoypadInputType)obs_data_get_int(data, "input_type");
@@ -138,6 +146,8 @@ static void save_binding_to_data(const JoypadBinding &binding, obs_data_t *data)
 {
 	obs_data_set_int(data, "uid", binding.uid);
 	obs_data_set_string(data, "device_id", binding.device_id.c_str());
+	obs_data_set_string(data, "device_stable_id", binding.device_stable_id.c_str());
+	obs_data_set_string(data, "device_type_id", binding.device_type_id.c_str());
 	obs_data_set_string(data, "device_name", binding.device_name.c_str());
 	obs_data_set_int(data, "button", binding.button);
 	obs_data_set_int(data, "input_type", (int)binding.input_type);
@@ -253,8 +263,7 @@ void JoypadConfigStore::Load()
 
 		JoypadBinding b1;
 		b1.uid = 1;
-		b1.device_id = "xinput:0";
-		b1.device_name = "Xbox Controller 1";
+		b1.device_name = "Any Device";
 		b1.button = 13;
 		b1.input_type = JoypadInputType::Button;
 		b1.action = JoypadActionType::TransitionToProgram;
@@ -263,8 +272,7 @@ void JoypadConfigStore::Load()
 
 		JoypadBinding b2;
 		b2.uid = 2;
-		b2.device_id = "xinput:0";
-		b2.device_name = "Xbox Controller 1";
+		b2.device_name = "Any Device";
 		b2.button = 10;
 		b2.input_type = JoypadInputType::Button;
 		b2.action = JoypadActionType::NextScene;
@@ -273,8 +281,7 @@ void JoypadConfigStore::Load()
 
 		JoypadBinding b3;
 		b3.uid = 3;
-		b3.device_id = "xinput:0";
-		b3.device_name = "Xbox Controller 1";
+		b3.device_name = "Any Device";
 		b3.button = 9;
 		b3.input_type = JoypadInputType::Button;
 		b3.action = JoypadActionType::PreviousScene;
@@ -283,8 +290,7 @@ void JoypadConfigStore::Load()
 
 		JoypadBinding b4;
 		b4.uid = 4;
-		b4.device_id = "xinput:0";
-		b4.device_name = "Xbox Controller 1";
+		b4.device_name = "Any Device";
 		b4.button = 14;
 		b4.input_type = JoypadInputType::Button;
 		b4.action = JoypadActionType::ToggleStudioMode;
@@ -885,7 +891,16 @@ std::vector<JoypadBinding> JoypadConfigStore::FindMatchingBindings(const JoypadE
 				continue;
 			}
 		}
-		if (!binding.device_id.empty() && binding.device_id != event.device_id) {
+		bool device_match = binding.device_id.empty() || binding.device_id == event.device_id;
+		if (!device_match && !binding.device_stable_id.empty() &&
+		    binding.device_stable_id == event.device_stable_id) {
+			device_match = true;
+		}
+		if (!device_match && !binding.device_type_id.empty() &&
+		    binding.device_type_id == event.device_type_id) {
+			device_match = true;
+		}
+		if (!device_match) {
 			continue;
 		}
 		matches.push_back(binding);

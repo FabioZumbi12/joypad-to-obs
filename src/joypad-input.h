@@ -30,6 +30,8 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 
 struct JoypadDeviceInfo {
 	std::string id;
+	std::string stable_id;
+	std::string type_id;
 	std::string name;
 };
 
@@ -56,14 +58,14 @@ public:
 private:
 	struct DeviceState {
 		std::string id;
+		std::string stable_id;
+		std::string type_id;
 		std::string name;
 		uint32_t last_buttons = 0;
 		double last_axes[8] = {0};
 		bool axis_initialized[8] = {false};
 		bool connected = false;
 		int winmm_id = -1;
-		bool is_xinput = false;
-		uint32_t xinput_id = 0;
 #ifdef _WIN32
 		int axis_min[6] = {0, 0, 0, 0, 0, 0};
 		int axis_max[6] = {0, 0, 0, 0, 0, 0};
@@ -78,6 +80,7 @@ private:
 	void PollLoop();
 	void DispatchEvent(const JoypadEvent &event);
 	void DispatchAxisAbsolute(const JoypadEvent &event);
+	void MarkDeviceDisconnected(DeviceState &state);
 
 	std::atomic<bool> running_{false};
 	std::thread poll_thread_;

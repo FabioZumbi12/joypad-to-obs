@@ -58,10 +58,62 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <vector>
 
 namespace {
+constexpr int kDeviceIdRole = Qt::UserRole;
+constexpr int kDeviceStableIdRole = Qt::UserRole + 1;
+constexpr int kDeviceTypeIdRole = Qt::UserRole + 2;
 
 inline QString L(const char *key)
 {
 	return QString::fromUtf8(obs_module_text(key));
+}
+
+bool looks_generic_device_name(const QString &name, const QString &type_id)
+{
+	const QString type = type_id.trimmed().toUpper();
+	// MID/PID comes from winmm caps and usually indicates generic driver naming.
+	if (type.startsWith("MID_")) {
+		return true;
+	}
+
+	const QString lower = name.trimmed().toLower();
+	return lower.isEmpty() || lower.contains("pc-joystick") || lower.contains("usb input device") ||
+	       lower.contains("hid-compliant") || lower.contains("hid compliant") || lower.contains("game controller");
+}
+
+QString format_device_label(const QString &name, const QString &type_id)
+{
+	QString base = name.trimmed();
+	if (base.isEmpty()) {
+		base = L("JoypadToOBS.Common.Unknown");
+	}
+	if (looks_generic_device_name(base, type_id)) {
+		const QString generic = L("JoypadToOBS.Common.Controller");
+		if (!type_id.isEmpty()) {
+			return QString("%1 [%2]").arg(generic, type_id);
+		}
+		return generic;
+	}
+	if (!type_id.isEmpty()) {
+		if (base.contains("[" + type_id + "]", Qt::CaseInsensitive)) {
+			return base;
+		}
+		return QString("%1 [%2]").arg(base, type_id);
+	}
+	return base;
+}
+
+QString device_label_from_info(const JoypadDeviceInfo &device)
+{
+	return format_device_label(QString::fromStdString(device.name), QString::fromStdString(device.type_id));
+}
+
+QString device_label_from_binding(const JoypadBinding &binding)
+{
+	if (binding.device_id.empty()) {
+		return L("JoypadToOBS.Common.Any");
+	}
+	return format_device_label(QString::fromStdString(binding.device_name),
+				   QString::fromStdString(binding.device_type_id));
 }
 
 QString action_to_text(JoypadActionType action)
@@ -310,9 +362,14 @@ public:
 
 		device_combo_ = new QComboBox(device_group);
 		device_combo_->addItem(L("JoypadToOBS.Common.AnyDevice"), QString());
+		device_combo_->setItemData(0, QString(), kDeviceStableIdRole);
+		device_combo_->setItemData(0, QString(), kDeviceTypeIdRole);
 
 		for (const auto &device : input_->GetDevices()) {
-			device_combo_->addItem(QString::fromStdString(device.name), QString::fromStdString(device.id));
+			const int idx = device_combo_->count();
+			device_combo_->addItem(device_label_from_info(device), QString::fromStdString(device.id));
+			device_combo_->setItemData(idx, QString::fromStdString(device.stable_id), kDeviceStableIdRole);
+			device_combo_->setItemData(idx, QString::fromStdString(device.type_id), kDeviceTypeIdRole);
 		}
 
 		button_label_ = new QLabel(L("JoypadToOBS.Common.NoButtonSelected"), device_group);
@@ -492,8 +549,16 @@ public:
 				if (event.axis_index != learned_event_.axis_index) {
 					return;
 				}
-				if (!learned_event_.device_id.empty() && event.device_id != learned_event_.device_id) {
-					return;
+				if (!learned_event_.device_id.empty()) {
+					const bool same_id = event.device_id == learned_event_.device_id;
+					const bool same_stable = !learned_event_.device_stable_id.empty() &&
+								 event.device_stable_id ==
+									 learned_event_.device_stable_id;
+					const bool same_type = !learned_event_.device_type_id.empty() &&
+							       event.device_type_id == learned_event_.device_type_id;
+					if (!same_id && !same_stable && !same_type) {
+						return;
+					}
 				}
 				QMetaObject::invokeMethod(
 					this,
@@ -580,7 +645,7 @@ private:
 			changed = true;
 		} else {
 			for (size_t i = 0; i < devices.size(); ++i) {
-				QString id = device_combo_->itemData((int)i + 1).toString();
+				QString id = device_combo_->itemData((int)i + 1, kDeviceIdRole).toString();
 				if (id.toStdString() != devices[i].id) {
 					changed = true;
 					break;
@@ -589,20 +654,35 @@ private:
 		}
 
 		if (changed) {
-			QString current_id = device_combo_->currentData().toString();
+			QString current_id = device_combo_->currentData(kDeviceIdRole).toString();
+			QString current_stable = device_combo_->currentData(kDeviceStableIdRole).toString();
+			QString current_type = device_combo_->currentData(kDeviceTypeIdRole).toString();
 			QString current_text = device_combo_->currentText();
 			device_combo_->blockSignals(true);
 			device_combo_->clear();
 			device_combo_->addItem(L("JoypadToOBS.Common.AnyDevice"), QString());
+			device_combo_->setItemData(0, QString(), kDeviceStableIdRole);
+			device_combo_->setItemData(0, QString(), kDeviceTypeIdRole);
 			for (const auto &device : devices) {
-				device_combo_->addItem(QString::fromStdString(device.name),
+				const int idx = device_combo_->count();
+				device_combo_->addItem(device_label_from_info(device),
 						       QString::fromStdString(device.id));
+				device_combo_->setItemData(idx, QString::fromStdString(device.stable_id),
+							   kDeviceStableIdRole);
+				device_combo_->setItemData(idx, QString::fromStdString(device.type_id),
+							   kDeviceTypeIdRole);
 			}
-			int idx = device_combo_->findData(current_id);
+			int idx = device_combo_->findData(current_id, kDeviceIdRole);
+			if (idx < 0 && !current_stable.isEmpty()) {
+				idx = device_combo_->findData(current_stable, kDeviceStableIdRole);
+			}
 			if (idx >= 0) {
 				device_combo_->setCurrentIndex(idx);
 			} else if (!current_id.isEmpty()) {
 				device_combo_->addItem(current_text, current_id);
+				const int extra = device_combo_->count() - 1;
+				device_combo_->setItemData(extra, current_stable, kDeviceStableIdRole);
+				device_combo_->setItemData(extra, current_type, kDeviceTypeIdRole);
 				device_combo_->setCurrentIndex(device_combo_->count() - 1);
 			}
 			device_combo_->blockSignals(false);
@@ -688,6 +768,8 @@ private:
 						    ? -binding.axis_threshold
 						    : binding.axis_threshold;
 		learned_event_.device_id = binding.device_id;
+		learned_event_.device_stable_id = binding.device_stable_id;
+		learned_event_.device_type_id = binding.device_type_id;
 		learned_event_.device_name = binding.device_name;
 		button_label_->setText(input_label_from_event(learned_event_));
 		UpdateAxisUi(learned_event_.is_axis);
@@ -715,10 +797,23 @@ private:
 						 QString::number(binding.axis_max_value, 'f', 2));
 		}
 
-		int device_index = device_combo_->findData(QString::fromStdString(binding.device_id));
+		int device_index = device_combo_->findData(QString::fromStdString(binding.device_id), kDeviceIdRole);
+		if (device_index < 0 && !binding.device_stable_id.empty()) {
+			device_index = device_combo_->findData(QString::fromStdString(binding.device_stable_id),
+							       kDeviceStableIdRole);
+		}
+		if (device_index < 0 && !binding.device_type_id.empty()) {
+			device_index = device_combo_->findData(QString::fromStdString(binding.device_type_id),
+							       kDeviceTypeIdRole);
+		}
 		if (device_index < 0 && !binding.device_id.empty()) {
 			device_combo_->addItem(QString::fromStdString(binding.device_name),
 					       QString::fromStdString(binding.device_id));
+			const int idx = device_combo_->count() - 1;
+			device_combo_->setItemData(idx, QString::fromStdString(binding.device_stable_id),
+						   kDeviceStableIdRole);
+			device_combo_->setItemData(idx, QString::fromStdString(binding.device_type_id),
+						   kDeviceTypeIdRole);
 			device_index = device_combo_->count() - 1;
 		}
 		if (device_index >= 0) {
@@ -894,16 +989,20 @@ private:
 					QString conflicts;
 					auto bindings = config_->GetBindingsSnapshot();
 					for (const auto &b : bindings) {
+						const bool same_device =
+							(!b.device_id.empty() && b.device_id == event.device_id) ||
+							(!b.device_stable_id.empty() &&
+							 b.device_stable_id == event.device_stable_id) ||
+							(!b.device_type_id.empty() &&
+							 b.device_type_id == event.device_type_id);
 						bool match = false;
 						if (event.is_axis) {
-							if (b.input_type == JoypadInputType::Axis &&
-							    b.device_id == event.device_id &&
+							if (b.input_type == JoypadInputType::Axis && same_device &&
 							    b.axis_index == event.axis_index) {
 								match = true;
 							}
 						} else {
-							if (b.input_type == JoypadInputType::Button &&
-							    b.device_id == event.device_id &&
+							if (b.input_type == JoypadInputType::Button && same_device &&
 							    b.button == event.button) {
 								match = true;
 							}
@@ -970,7 +1069,15 @@ private:
 
 	void SelectDevice(const JoypadEvent &event)
 	{
-		int index = device_combo_->findData(QString::fromStdString(event.device_id));
+		int index = device_combo_->findData(QString::fromStdString(event.device_id), kDeviceIdRole);
+		if (index < 0 && !event.device_stable_id.empty()) {
+			index = device_combo_->findData(QString::fromStdString(event.device_stable_id),
+							kDeviceStableIdRole);
+		}
+		if (index < 0 && !event.device_type_id.empty()) {
+			index = device_combo_->findData(QString::fromStdString(event.device_type_id),
+							kDeviceTypeIdRole);
+		}
 		if (index >= 0) {
 			device_combo_->setCurrentIndex(index);
 		}
@@ -984,7 +1091,9 @@ private:
 		}
 
 		binding_.button = learned_event_.button;
-		binding_.device_id = device_combo_->currentData().toString().toStdString();
+		binding_.device_id = device_combo_->currentData(kDeviceIdRole).toString().toStdString();
+		binding_.device_stable_id = device_combo_->currentData(kDeviceStableIdRole).toString().toStdString();
+		binding_.device_type_id = device_combo_->currentData(kDeviceTypeIdRole).toString().toStdString();
 		binding_.device_name = device_combo_->currentText().toStdString();
 
 		if (CurrentAction() == JoypadActionType::SetSourceVolumePercent && !learned_event_.is_axis) {
@@ -1646,8 +1755,7 @@ void JoypadToolsDialog::RefreshBindings()
 
 	for (int row = 0; row < (int)bindings.size(); ++row) {
 		const auto &binding = bindings[(size_t)row];
-		const QString device = binding.device_id.empty() ? L("JoypadToOBS.Common.Any")
-								 : QString::fromStdString(binding.device_name);
+		const QString device = device_label_from_binding(binding);
 
 		QWidget *chk_widget = new QWidget();
 		QHBoxLayout *chk_layout = new QHBoxLayout(chk_widget);

@@ -75,6 +75,8 @@ enum class JoypadOsdPosition {
 struct JoypadBinding {
 	int64_t uid = 0;
 	std::string device_id;
+	std::string device_stable_id;
+	std::string device_type_id;
 	std::string device_name;
 	int button = -1;
 	JoypadInputType input_type = JoypadInputType::Button;
@@ -102,6 +104,8 @@ struct JoypadBinding {
 
 struct JoypadEvent {
 	std::string device_id;
+	std::string device_stable_id;
+	std::string device_type_id;
 	std::string device_name;
 	int button = -1;
 	bool is_axis = false;
