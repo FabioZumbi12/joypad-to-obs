@@ -30,6 +30,7 @@ class QLabel;
 class QComboBox;
 class QTimer;
 class QPlainTextEdit;
+class JoypadActionEngine;
 
 class JoypadToolsDialog : public QDialog {
 public:
@@ -56,3 +57,6 @@ private:
 	QTimer *update_timer_ = nullptr;
 	QTimer *comment_debounce_timer_ = nullptr;
 };
+
+bool JoypadUiIsBindingDialogOpen();
+bool JoypadUiEmulateBindingDialogAction(const JoypadEvent &event, JoypadActionEngine *actions);

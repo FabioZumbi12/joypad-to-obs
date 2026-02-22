@@ -247,12 +247,24 @@ bool obs_module_load(void)
 	});
 
 	g_input.SetOnButtonPressed([](const JoypadEvent &event) {
+		if (JoypadUiEmulateBindingDialogAction(event, &g_actions)) {
+			return;
+		}
+		if (JoypadUiIsBindingDialogOpen()) {
+			return;
+		}
 		auto matches = g_config.FindMatchingBindings(event);
 		for (const auto &binding : matches) {
 			g_actions.Execute(binding);
 		}
 	});
 	g_input.SetOnAxisChanged([](const JoypadEvent &event) {
+		if (JoypadUiEmulateBindingDialogAction(event, &g_actions)) {
+			return;
+		}
+		if (JoypadUiIsBindingDialogOpen()) {
+			return;
+		}
 		if (!event.is_axis) {
 			return;
 		}
@@ -260,8 +272,6 @@ bool obs_module_load(void)
 		if (matches.empty()) {
 			return;
 		}
-		obs_log(LOG_INFO, "axis raw: device=%s axis=%d value=%.3f", event.device_name.c_str(), event.axis_index,
-			event.axis_raw_value);
 		for (const auto &binding : matches) {
 			g_actions.Execute(binding);
 			if (binding.action == JoypadActionType::SetSourceVolumePercent) {
