@@ -14,13 +14,18 @@ This plugin **does not** provide a visual overlay for your controller. Its purpo
 
 *   **Control OBS with Your Gamepad:** Map buttons and analog sticks to a wide range of OBS actions.
 *   **Direct Hardware Access:** No intermediate software needed. The plugin communicates directly with any controller recognized by the operating system (e.g., in Windows' "joy.cpl" Game Controllers panel).
-*   **Platform Support:** Primarily developed and tested for **Windows**. The code includes support for macOS and Linux, but it is currently untested and should be considered experimental.
+*   **Platform Support:** Primarily developed and tested for **Windows**. macOS and Linux input paths exist, but are currently experimental.
 *   **Broad Device Compatibility:**
-    *   **Gamepads:** Works with XInput (Xbox), DirectInput (PlayStation, Logitech), and generic USB controllers.
+    *   **Windows Input Backends:**
+        *   **XInput:** Used for Xbox controllers and devices that expose an XInput interface.
+        *   **DirectInput:** Used for HID/generic controllers and other non-XInput game controllers.
+        *   **Auto de-duplication:** When both APIs expose the same physical controller, the plugin avoids duplicate entries/actions.
     *   **Custom Hardware:** Compatible with **Arduino-based devices** that appear as a standard joystick, allowing you to use potentiometers, encoders, and sliders to control OBS.
 *   **Intuitive UI:** A dedicated "Tools" menu dialog to create, edit, and manage all your bindings.
 *   **"Learn" Mode:** Simply press a button or move an axis on your controller to assign it to an action.
 *   **Advanced Axis Configuration:** Calibrate axis range (Min/Max), set deadzones (Threshold), and invert axis direction for precise control.
+*   **OBS Hotkey to Pause/Resume Controller Listening:** Toggle all gamepad input processing on/off from OBS Hotkeys.
+*   **OSD Feedback for Listening State:** When the listening toggle hotkey is used, an OSD message shows whether listening is On or Off.
 
 ## Supported Actions
 
@@ -76,10 +81,17 @@ When you create a profile, the plugin automatically registers a corresponding **
 
 When triggered, the plugin will instantly load the bindings for that profile.
 
+The plugin also registers a global hotkey:
+
+*   `Joypad to OBS: Toggle gamepad listening`
+
+Use it to quickly disable/enable all controller-triggered actions without removing bindings.  
+If OSD notifications are enabled, this hotkey also shows the current listening state (`On`/`Off`) on screen.
+
 ## Requirements
 
 *   **OBS Studio:** Version 28 or newer.
-*   **Operating System:** Windows 10/11, macOS, or a modern Linux distribution.
+*   **Operating System:** Windows 10/11 (recommended). macOS and modern Linux distributions are available in experimental mode.
 
 ## How to Use
 
@@ -96,6 +108,7 @@ When triggered, the plugin will instantly load the bindings for that profile.
     *   Configure the target (e.g., choose the specific scene or source).
     *   Click **OK** to save the binding.
 5.  Your controller is now ready to control OBS!
+6.  (Optional) In **OBS Settings -> Hotkeys**, assign `Joypad to OBS: Toggle gamepad listening` to quickly pause/resume controller input while streaming.
 
 ## Building from Source
 
