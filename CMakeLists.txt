@@ -69,7 +69,10 @@ target_sources(
 )
 
 if(WIN32)
-  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE winmm advapi32 setupapi hid)
+  target_link_libraries(
+    ${CMAKE_PROJECT_NAME}
+    PRIVATE dinput8 dxguid wbemuuid ole32 oleaut32
+  )
 endif()
 
 if(APPLE)

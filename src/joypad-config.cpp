@@ -35,6 +35,32 @@ const char *kConfigFileName = "joypad-to-obs.json";
 constexpr int kOsdPositionMin = (int)JoypadOsdPosition::TopLeft;
 constexpr int kOsdPositionMax = (int)JoypadOsdPosition::BottomRight;
 
+std::string to_upper_copy(const std::string &s)
+{
+	std::string out = s;
+	std::transform(out.begin(), out.end(), out.begin(), [](unsigned char c) { return (char)std::toupper(c); });
+	return out;
+}
+
+bool contains_upper(const std::string &haystack_upper, const char *needle_upper)
+{
+	return haystack_upper.find(needle_upper) != std::string::npos;
+}
+
+bool is_xbox_like(const std::string &device_id, const std::string &device_type_id, const std::string &device_name)
+{
+	(void)device_id;
+	const std::string type_up = to_upper_copy(device_type_id);
+	const std::string name_up = to_upper_copy(device_name);
+	if (contains_upper(type_up, "VID_045E")) {
+		return true;
+	}
+	if (contains_upper(name_up, "XBOX")) {
+		return true;
+	}
+	return false;
+}
+
 void profile_hotkey_callback(void *data, obs_hotkey_id id, obs_hotkey_t *hotkey, bool pressed)
 {
 	if (!pressed)
@@ -59,8 +85,6 @@ void register_profile_hotkey(JoypadConfigStore *store, JoypadProfile &profile)
 	}
 
 	profile.hotkey_id = obs_hotkey_register_frontend(name.c_str(), desc.c_str(), profile_hotkey_callback, store);
-	obs_log(LOG_INFO, "Registered hotkey for profile '%s' with ID %d", profile.name.c_str(),
-		(int)profile.hotkey_id);
 }
 
 void unregister_profile_hotkey(JoypadProfile &profile)
@@ -269,8 +293,10 @@ void JoypadConfigStore::Load()
 
 		JoypadBinding b1;
 		b1.uid = 1;
-		b1.device_name = "Any Device";
-		b1.button = 13;
+		b1.device_id = "xinput:0";
+		b1.device_type_id = "VID_045E&PID_XINPUT";
+		b1.device_name = "Xbox Controller 1";
+		b1.button = 1;
 		b1.input_type = JoypadInputType::Button;
 		b1.action = JoypadActionType::TransitionToProgram;
 		b1.enabled = true;
@@ -278,8 +304,10 @@ void JoypadConfigStore::Load()
 
 		JoypadBinding b2;
 		b2.uid = 2;
-		b2.device_name = "Any Device";
-		b2.button = 10;
+		b2.device_id = "xinput:0";
+		b2.device_type_id = "VID_045E&PID_XINPUT";
+		b2.device_name = "Xbox Controller 1";
+		b2.button = 6;
 		b2.input_type = JoypadInputType::Button;
 		b2.action = JoypadActionType::NextScene;
 		b2.enabled = true;
@@ -287,8 +315,10 @@ void JoypadConfigStore::Load()
 
 		JoypadBinding b3;
 		b3.uid = 3;
-		b3.device_name = "Any Device";
-		b3.button = 9;
+		b3.device_id = "xinput:0";
+		b3.device_type_id = "VID_045E&PID_XINPUT";
+		b3.device_name = "Xbox Controller 1";
+		b3.button = 5;
 		b3.input_type = JoypadInputType::Button;
 		b3.action = JoypadActionType::PreviousScene;
 		b3.enabled = true;
@@ -296,8 +326,10 @@ void JoypadConfigStore::Load()
 
 		JoypadBinding b4;
 		b4.uid = 4;
-		b4.device_name = "Any Device";
-		b4.button = 14;
+		b4.device_id = "xinput:0";
+		b4.device_type_id = "VID_045E&PID_XINPUT";
+		b4.device_name = "Xbox Controller 1";
+		b4.button = 2;
 		b4.input_type = JoypadInputType::Button;
 		b4.action = JoypadActionType::ToggleStudioMode;
 		b4.enabled = true;
@@ -498,8 +530,6 @@ void JoypadConfigStore::Save()
 
 		if (profile.hotkey_id != OBS_INVALID_HOTKEY_ID) {
 			obs_data_array_t *hotkey_data = obs_hotkey_save(profile.hotkey_id);
-			int count = hotkey_data ? (int)obs_data_array_count(hotkey_data) : 0;
-			obs_log(LOG_INFO, "Saving %d hotkey bindings for profile '%s'", count, profile.name.c_str());
 			if (hotkey_data) {
 				obs_data_set_array(p_item, "hotkey_data", hotkey_data);
 				obs_data_array_release(hotkey_data);
@@ -600,7 +630,6 @@ void JoypadConfigStore::SwitchProfileByHotkey(obs_hotkey_id id)
 		}
 	}
 	if (changed) {
-		obs_log(LOG_INFO, "Switched to profile '%s' via hotkey", name.c_str());
 		if (callback) {
 			callback(name);
 		}
@@ -911,6 +940,14 @@ std::vector<JoypadBinding> JoypadConfigStore::FindMatchingBindings(const JoypadE
 			device_match = true;
 		}
 		if (!device_match) {
+			const bool binding_xbox =
+				is_xbox_like(binding.device_id, binding.device_type_id, binding.device_name);
+			const bool event_xbox = is_xbox_like(event.device_id, event.device_type_id, event.device_name);
+			if (binding_xbox && event_xbox) {
+				device_match = true;
+			}
+		}
+		if (!device_match) {
 			continue;
 		}
 		matches.push_back(binding);
@@ -1052,6 +1089,9 @@ bool JoypadConfigStore::ExportProfile(int index, const std::string &filepath)
 	for (const auto &b : profile.bindings) {
 		obs_data_t *item = obs_data_create();
 		save_binding_to_data(b, item);
+		// Keep exported profiles portable and less device-specific.
+		// Resolution will still work via device_id/device_type_id matching.
+		obs_data_erase(item, "device_stable_id");
 		obs_data_array_push_back(arr, item);
 		obs_data_release(item);
 	}

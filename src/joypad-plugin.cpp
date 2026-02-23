@@ -37,6 +37,9 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <QPropertyAnimation>
 #include <QSequentialAnimationGroup>
 #include <QColor>
+#if defined(_WIN32)
+#include <windows.h>
+#endif
 
 OBS_DECLARE_MODULE()
 OBS_MODULE_USE_DEFAULT_LOCALE(PLUGIN_NAME, "en-US")
@@ -280,6 +283,15 @@ bool obs_module_load(void)
 		}
 	});
 	ApplyStoredAxisValues();
+#if defined(_WIN32)
+	{
+		auto *main_window = reinterpret_cast<QWidget *>(obs_frontend_get_main_window());
+		if (main_window) {
+			HWND hwnd = reinterpret_cast<HWND>(main_window->winId());
+			g_input.SetNativeWindowHandle((void *)hwnd);
+		}
+	}
+#endif
 	g_input.Start();
 
 	obs_frontend_add_save_callback(save_hotkeys, nullptr);

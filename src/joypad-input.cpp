@@ -20,18 +20,21 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 
 #include <chrono>
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cctype>
 #include <cstring>
 #include <cerrno>
 #include <cstdio>
+#include <unordered_set>
 
 #ifdef _WIN32
 #include <windows.h>
-#include <mmsystem.h>
-#include <setupapi.h>
-#include <hidsdi.h>
-#include <devguid.h>
-#include <tchar.h>
+#include <dbt.h>
+#include <xinput.h>
+#define DIRECTINPUT_VERSION 0x0800
+#include <dinput.h>
+#include <wbemidl.h>
 #elif defined(__linux__)
 #include <dirent.h>
 #include <fcntl.h>
@@ -47,25 +50,468 @@ namespace {
 constexpr int kMaxTrackedAxes = 8;
 
 #ifdef _WIN32
-std::string build_winmm_stable_id(const JOYCAPS &caps, const std::string &resolved_name,
-				  const std::string &registry_key)
+struct DiControllerInfo {
+	IDirectInputDevice8W *device = nullptr;
+	std::string id;
+	std::string stable_id;
+	std::string type_id;
+	std::string name;
+};
+
+struct XInputApi {
+	HMODULE module = nullptr;
+	DWORD(WINAPI *get_state)(DWORD, XINPUT_STATE *) = nullptr;
+	DWORD(WINAPI *get_capabilities)(DWORD, DWORD, XINPUT_CAPABILITIES *) = nullptr;
+};
+
+struct XInputControllerInfo {
+	DWORD slot = 0;
+	std::string id;
+	std::string stable_id;
+	std::string type_id;
+	std::string name;
+};
+
+std::string wide_to_utf8(const wchar_t *wstr);
+
+XInputApi g_xinput_api;
+
+bool xinput_ready()
 {
-	std::string key = "winmm:";
-	key += "mid=" + std::to_string((unsigned int)caps.wMid);
-	key += "|pid=" + std::to_string((unsigned int)caps.wPid);
-	key += "|axes=" + std::to_string((unsigned int)caps.wNumAxes);
-	key += "|buttons=" + std::to_string((unsigned int)caps.wNumButtons);
-	key += "|reg=" + registry_key;
-	key += "|name=" + resolved_name;
-	return key;
+	return g_xinput_api.module != nullptr && g_xinput_api.get_state != nullptr;
 }
 
-std::string build_winmm_type_id(const JOYCAPS &caps, const std::string &vid_pid_key)
+void load_xinput_api()
 {
-	if (!vid_pid_key.empty()) {
-		return vid_pid_key;
+	if (xinput_ready()) {
+		return;
 	}
-	return "MID_" + std::to_string((unsigned int)caps.wMid) + "&PID_" + std::to_string((unsigned int)caps.wPid);
+	const char *dlls[] = {"xinput1_4.dll", "xinput1_3.dll", "xinput9_1_0.dll"};
+	for (const char *dll_name : dlls) {
+		HMODULE mod = LoadLibraryA(dll_name);
+		if (!mod) {
+			continue;
+		}
+		auto fn_get_state = (DWORD(WINAPI *)(DWORD, XINPUT_STATE *))GetProcAddress(mod, "XInputGetState");
+		if (!fn_get_state) {
+			FreeLibrary(mod);
+			continue;
+		}
+		auto fn_get_caps = (DWORD(WINAPI *)(DWORD, DWORD,
+						    XINPUT_CAPABILITIES *))GetProcAddress(mod, "XInputGetCapabilities");
+		g_xinput_api.module = mod;
+		g_xinput_api.get_state = fn_get_state;
+		g_xinput_api.get_capabilities = fn_get_caps;
+		return;
+	}
+}
+
+void unload_xinput_api()
+{
+	if (g_xinput_api.module) {
+		FreeLibrary(g_xinput_api.module);
+	}
+	g_xinput_api = {};
+}
+
+std::string xinput_type_id(DWORD slot)
+{
+	if (!xinput_ready() || !g_xinput_api.get_capabilities) {
+		return "VID_045E&PID_XINPUT";
+	}
+	XINPUT_CAPABILITIES caps = {};
+	if (g_xinput_api.get_capabilities(slot, XINPUT_FLAG_GAMEPAD, &caps) != ERROR_SUCCESS) {
+		return "VID_045E&PID_XINPUT";
+	}
+	if (caps.SubType == XINPUT_DEVSUBTYPE_GAMEPAD) {
+		return "VID_045E&PID_XINPUT";
+	}
+	return "XINPUT_GAMEPAD";
+}
+
+std::vector<XInputControllerInfo> enumerate_xinput_controllers()
+{
+	std::vector<XInputControllerInfo> out;
+	if (!xinput_ready()) {
+		return out;
+	}
+	for (DWORD slot = 0; slot < XUSER_MAX_COUNT; ++slot) {
+		XINPUT_STATE state = {};
+		if (g_xinput_api.get_state(slot, &state) != ERROR_SUCCESS) {
+			continue;
+		}
+		XInputControllerInfo info;
+		info.slot = slot;
+		info.id = "xinput:" + std::to_string((unsigned long long)slot);
+		info.stable_id = info.id;
+		info.type_id = xinput_type_id(slot);
+		info.name = "Xbox Controller " + std::to_string((unsigned long long)(slot + 1));
+		out.push_back(std::move(info));
+	}
+	return out;
+}
+
+std::string to_upper_ascii(std::string text)
+{
+	std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) { return (char)std::toupper(c); });
+	return text;
+}
+
+bool extract_vid_pid(const std::string &text, uint16_t &vid_out, uint16_t &pid_out)
+{
+	std::string upper = to_upper_ascii(text);
+	size_t vid_pos = upper.find("VID_");
+	size_t pid_pos = upper.find("PID_");
+	if (vid_pos == std::string::npos || pid_pos == std::string::npos || vid_pos + 8 > upper.size() ||
+	    pid_pos + 8 > upper.size()) {
+		return false;
+	}
+	char *endp = nullptr;
+	unsigned long vid = strtoul(upper.substr(vid_pos + 4, 4).c_str(), &endp, 16);
+	if (!endp || *endp != '\0' || vid > 0xFFFF) {
+		return false;
+	}
+	unsigned long pid = strtoul(upper.substr(pid_pos + 4, 4).c_str(), &endp, 16);
+	if (!endp || *endp != '\0' || pid > 0xFFFF) {
+		return false;
+	}
+	vid_out = (uint16_t)vid;
+	pid_out = (uint16_t)pid;
+	return true;
+}
+
+std::unordered_set<uint32_t> query_xinput_vidpid_from_wmi()
+{
+	std::unordered_set<uint32_t> out;
+
+	HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+	const bool should_uninit = SUCCEEDED(hr);
+	if (FAILED(hr) && hr != RPC_E_CHANGED_MODE) {
+		return out;
+	}
+
+	hr = CoInitializeSecurity(nullptr, -1, nullptr, nullptr, RPC_C_AUTHN_LEVEL_DEFAULT, RPC_C_IMP_LEVEL_IMPERSONATE,
+				  nullptr, EOAC_NONE, nullptr);
+	if (FAILED(hr) && hr != RPC_E_TOO_LATE) {
+		if (should_uninit) {
+			CoUninitialize();
+		}
+		return out;
+	}
+
+	IWbemLocator *locator = nullptr;
+	hr = CoCreateInstance(CLSID_WbemLocator, nullptr, CLSCTX_INPROC_SERVER, IID_IWbemLocator,
+			      reinterpret_cast<void **>(&locator));
+	if (FAILED(hr) || !locator) {
+		if (should_uninit) {
+			CoUninitialize();
+		}
+		return out;
+	}
+
+	IWbemServices *services = nullptr;
+	BSTR ns = SysAllocString(L"ROOT\\CIMV2");
+	hr = locator->ConnectServer(ns, nullptr, nullptr, nullptr, 0, nullptr, nullptr, &services);
+	SysFreeString(ns);
+	if (FAILED(hr) || !services) {
+		locator->Release();
+		if (should_uninit) {
+			CoUninitialize();
+		}
+		return out;
+	}
+
+	hr = CoSetProxyBlanket(services, RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE, nullptr, RPC_C_AUTHN_LEVEL_CALL,
+			       RPC_C_IMP_LEVEL_IMPERSONATE, nullptr, EOAC_NONE);
+	if (FAILED(hr)) {
+		services->Release();
+		locator->Release();
+		if (should_uninit) {
+			CoUninitialize();
+		}
+		return out;
+	}
+
+	IEnumWbemClassObject *enumerator = nullptr;
+	BSTR lang = SysAllocString(L"WQL");
+	BSTR query = SysAllocString(L"SELECT DeviceID FROM Win32_PNPEntity WHERE DeviceID LIKE '%IG_%'");
+	hr = services->ExecQuery(lang, query, WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY, nullptr,
+				 &enumerator);
+	SysFreeString(query);
+	SysFreeString(lang);
+	if (SUCCEEDED(hr) && enumerator) {
+		while (true) {
+			IWbemClassObject *obj = nullptr;
+			ULONG ret = 0;
+			hr = enumerator->Next(200, 1, &obj, &ret);
+			if (FAILED(hr) || ret == 0 || !obj) {
+				break;
+			}
+
+			VARIANT var;
+			VariantInit(&var);
+			HRESULT get_hr = obj->Get(L"DeviceID", 0, &var, nullptr, nullptr);
+			if (SUCCEEDED(get_hr) && var.vt == VT_BSTR && var.bstrVal) {
+				std::string device_id = wide_to_utf8(var.bstrVal);
+				uint16_t vid = 0;
+				uint16_t pid = 0;
+				if (extract_vid_pid(device_id, vid, pid)) {
+					out.insert((uint32_t)MAKELONG(vid, pid));
+				}
+			}
+			VariantClear(&var);
+			obj->Release();
+		}
+		enumerator->Release();
+	}
+
+	services->Release();
+	locator->Release();
+	if (should_uninit) {
+		CoUninitialize();
+	}
+	return out;
+}
+
+bool is_xinput_vidpid(uint16_t vid, uint16_t pid)
+{
+	static std::once_flag once;
+	static std::unordered_set<uint32_t> xinput_vidpid;
+	std::call_once(once, []() { xinput_vidpid = query_xinput_vidpid_from_wmi(); });
+	return xinput_vidpid.find((uint32_t)MAKELONG(vid, pid)) != xinput_vidpid.end();
+}
+
+bool is_xinput_shadow_device(const DiControllerInfo &di_info, const std::vector<XInputControllerInfo> &xinput_infos)
+{
+	if (xinput_infos.empty()) {
+		return false;
+	}
+
+	uint16_t vid = 0;
+	uint16_t pid = 0;
+	if (extract_vid_pid(di_info.type_id, vid, pid) && is_xinput_vidpid(vid, pid)) {
+		return true;
+	}
+
+	std::string name_up = to_upper_ascii(di_info.name);
+	if (name_up.find("XBOX") != std::string::npos || name_up.find("XINPUT") != std::string::npos) {
+		return true;
+	}
+	return false;
+}
+
+double xinput_normalize_thumb(short v)
+{
+	if (v >= 0) {
+		return std::clamp((double)v / 32767.0, 0.0, 1.0);
+	}
+	return std::clamp((double)v / 32768.0, -1.0, 0.0);
+}
+
+void xinput_read_buttons_axes(const XINPUT_STATE &state, uint32_t &buttons_out,
+			      std::array<double, kMaxTrackedAxes> &axes_out)
+{
+	buttons_out = 0;
+	const WORD b = state.Gamepad.wButtons;
+	if (b & XINPUT_GAMEPAD_A)
+		buttons_out |= (1u << 0);
+	if (b & XINPUT_GAMEPAD_B)
+		buttons_out |= (1u << 1);
+	if (b & XINPUT_GAMEPAD_X)
+		buttons_out |= (1u << 2);
+	if (b & XINPUT_GAMEPAD_Y)
+		buttons_out |= (1u << 3);
+	if (b & XINPUT_GAMEPAD_LEFT_SHOULDER)
+		buttons_out |= (1u << 4);
+	if (b & XINPUT_GAMEPAD_RIGHT_SHOULDER)
+		buttons_out |= (1u << 5);
+	if (b & XINPUT_GAMEPAD_BACK)
+		buttons_out |= (1u << 6);
+	if (b & XINPUT_GAMEPAD_START)
+		buttons_out |= (1u << 7);
+	if (b & XINPUT_GAMEPAD_LEFT_THUMB)
+		buttons_out |= (1u << 8);
+	if (b & XINPUT_GAMEPAD_RIGHT_THUMB)
+		buttons_out |= (1u << 9);
+	if (b & XINPUT_GAMEPAD_DPAD_UP)
+		buttons_out |= (1u << 10);
+	if (b & XINPUT_GAMEPAD_DPAD_DOWN)
+		buttons_out |= (1u << 11);
+	if (b & XINPUT_GAMEPAD_DPAD_LEFT)
+		buttons_out |= (1u << 12);
+	if (b & XINPUT_GAMEPAD_DPAD_RIGHT)
+		buttons_out |= (1u << 13);
+
+	axes_out[0] = xinput_normalize_thumb(state.Gamepad.sThumbLX);
+	axes_out[1] = xinput_normalize_thumb(state.Gamepad.sThumbLY);
+	axes_out[2] = xinput_normalize_thumb(state.Gamepad.sThumbRX);
+	axes_out[3] = xinput_normalize_thumb(state.Gamepad.sThumbRY);
+	axes_out[4] = std::clamp((double)state.Gamepad.bLeftTrigger / 255.0, 0.0, 1.0);
+	axes_out[5] = std::clamp((double)state.Gamepad.bRightTrigger / 255.0, 0.0, 1.0);
+	axes_out[6] = 0.0;
+	axes_out[7] = 0.0;
+}
+
+std::string wide_to_utf8(const wchar_t *wstr)
+{
+	if (!wstr || !*wstr) {
+		return {};
+	}
+	int len = WideCharToMultiByte(CP_UTF8, 0, wstr, -1, nullptr, 0, nullptr, nullptr);
+	if (len <= 0) {
+		return {};
+	}
+	std::vector<char> out((size_t)len);
+	WideCharToMultiByte(CP_UTF8, 0, wstr, -1, out.data(), len, nullptr, nullptr);
+	return std::string(out.data());
+}
+
+std::string guid_to_string(const GUID &guid)
+{
+	char buf[64] = {};
+	snprintf(buf, sizeof(buf), "%08lX-%04hX-%04hX-%02hhX%02hhX-%02hhX%02hhX%02hhX%02hhX%02hhX%02hhX",
+		 (unsigned long)guid.Data1, guid.Data2, guid.Data3, guid.Data4[0], guid.Data4[1], guid.Data4[2],
+		 guid.Data4[3], guid.Data4[4], guid.Data4[5], guid.Data4[6], guid.Data4[7]);
+	return std::string(buf);
+}
+
+std::string dinput_type_id(const GUID &product_guid)
+{
+	uint16_t vid = LOWORD(product_guid.Data1);
+	uint16_t pid = HIWORD(product_guid.Data1);
+	if (vid != 0 || pid != 0) {
+		char buf[32] = {};
+		snprintf(buf, sizeof(buf), "VID_%04X&PID_%04X", vid, pid);
+		return std::string(buf);
+	}
+	return "DINPUT_" + guid_to_string(product_guid);
+}
+
+BOOL CALLBACK enum_axis_callback(const DIDEVICEOBJECTINSTANCEW *instance, void *context)
+{
+	(void)instance;
+	auto *device = static_cast<IDirectInputDevice8W *>(context);
+	if (!device) {
+		return DIENUM_CONTINUE;
+	}
+	DIPROPRANGE range = {};
+	range.diph.dwSize = sizeof(DIPROPRANGE);
+	range.diph.dwHeaderSize = sizeof(DIPROPHEADER);
+	range.diph.dwObj = instance->dwType;
+	range.diph.dwHow = DIPH_BYID;
+	range.lMin = -1000;
+	range.lMax = 1000;
+	device->SetProperty(DIPROP_RANGE, &range.diph);
+	return DIENUM_CONTINUE;
+}
+
+struct EnumContext {
+	IDirectInput8W *dinput = nullptr;
+	HWND hwnd = nullptr;
+	std::vector<DiControllerInfo> *out = nullptr;
+};
+
+BOOL CALLBACK enum_device_callback(const DIDEVICEINSTANCEW *instance, void *context_ptr)
+{
+	auto *context = static_cast<EnumContext *>(context_ptr);
+	if (!context || !context->dinput || !context->out) {
+		return DIENUM_STOP;
+	}
+
+	IDirectInputDevice8W *device = nullptr;
+	if (FAILED(context->dinput->CreateDevice(instance->guidInstance, &device, nullptr)) || !device) {
+		return DIENUM_CONTINUE;
+	}
+
+	if (FAILED(device->SetDataFormat(&c_dfDIJoystick2))) {
+		device->Release();
+		return DIENUM_CONTINUE;
+	}
+
+	if (FAILED(device->SetCooperativeLevel(context->hwnd, DISCL_BACKGROUND | DISCL_NONEXCLUSIVE))) {
+		device->Release();
+		return DIENUM_CONTINUE;
+	}
+
+	device->EnumObjects(enum_axis_callback, device, DIDFT_AXIS);
+	device->Acquire();
+
+	DiControllerInfo info;
+	info.device = device;
+	info.id = "dinput:" + guid_to_string(instance->guidInstance);
+	info.stable_id = info.id;
+	info.type_id = dinput_type_id(instance->guidProduct);
+	info.name = wide_to_utf8(instance->tszProductName);
+	if (info.name.empty()) {
+		info.name = wide_to_utf8(instance->tszInstanceName);
+	}
+	if (info.name.empty()) {
+		info.name = "Controller";
+	}
+	context->out->push_back(std::move(info));
+
+	return DIENUM_CONTINUE;
+}
+
+HWND create_input_window()
+{
+	static const wchar_t *kClassName = L"JoypadToOBSDeviceNotifyWindow";
+	static bool class_registered = false;
+	HINSTANCE hinst = GetModuleHandleW(nullptr);
+
+	if (!class_registered) {
+		WNDCLASSW wc = {};
+		wc.lpfnWndProc = [](HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) -> LRESULT {
+			switch (msg) {
+			case WM_NCCREATE: {
+				CREATESTRUCTW *cs = reinterpret_cast<CREATESTRUCTW *>(lparam);
+				SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)cs->lpCreateParams);
+				return TRUE;
+			}
+			case WM_DEVICECHANGE: {
+				if (wparam == DBT_DEVICEARRIVAL || wparam == DBT_DEVICEREMOVECOMPLETE ||
+				    wparam == DBT_DEVNODES_CHANGED) {
+					auto *flag = reinterpret_cast<std::atomic<bool> *>(
+						GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+					if (flag) {
+						flag->store(true);
+					}
+				}
+				return 0;
+			}
+			default:
+				break;
+			}
+			return DefWindowProcW(hwnd, msg, wparam, lparam);
+		};
+		wc.hInstance = hinst;
+		wc.lpszClassName = kClassName;
+		class_registered = (RegisterClassW(&wc) != 0);
+	}
+
+	if (!class_registered) {
+		return nullptr;
+	}
+
+	HWND hwnd = CreateWindowExW(0, kClassName, L"joypad-to-obs-device-notify", WS_POPUP, 0, 0, 1, 1, nullptr,
+				    nullptr, hinst, nullptr);
+	return hwnd;
+}
+
+std::vector<DiControllerInfo> enumerate_dinput_controllers(IDirectInput8W *dinput, HWND hwnd)
+{
+	std::vector<DiControllerInfo> out;
+	if (!dinput || !hwnd) {
+		return out;
+	}
+	EnumContext context;
+	context.dinput = dinput;
+	context.hwnd = hwnd;
+	context.out = &out;
+	dinput->EnumDevices(DI8DEVCLASS_GAMECTRL, enum_device_callback, &context, DIEDFL_ATTACHEDONLY);
+	std::sort(out.begin(), out.end(),
+		  [](const DiControllerInfo &a, const DiControllerInfo &b) { return a.id < b.id; });
+	return out;
 }
 #endif
 } // namespace
@@ -77,11 +523,54 @@ JoypadInputManager::~JoypadInputManager()
 	Stop();
 }
 
+void JoypadInputManager::SetNativeWindowHandle(void *hwnd)
+{
+#if defined(_WIN32)
+	std::lock_guard<std::mutex> lock(devices_mutex_);
+	native_hwnd_ = hwnd;
+#else
+	(void)hwnd;
+#endif
+}
+
 void JoypadInputManager::Start()
 {
 	if (running_.exchange(true)) {
 		return;
 	}
+
+#if defined(_WIN32)
+	device_change_pending_.store(false);
+	load_xinput_api();
+	HWND notify_hwnd = create_input_window();
+	if (notify_hwnd) {
+		SetWindowLongPtrW(notify_hwnd, GWLP_USERDATA, (LONG_PTR)&device_change_pending_);
+		dinput_notify_hwnd_ = notify_hwnd;
+
+		DEV_BROADCAST_DEVICEINTERFACE_W filter = {};
+		filter.dbcc_size = sizeof(filter);
+		filter.dbcc_devicetype = DBT_DEVTYP_DEVICEINTERFACE;
+		filter.dbcc_classguid = {0x4D1E55B2, 0xF16F, 0x11CF, {0x88, 0xCB, 0x00, 0x11, 0x11, 0x00, 0x00, 0x30}};
+		dinput_devnotify_ = RegisterDeviceNotificationW(notify_hwnd, &filter, DEVICE_NOTIFY_WINDOW_HANDLE);
+	}
+
+	HWND coop_hwnd = static_cast<HWND>(native_hwnd_);
+	if (!coop_hwnd) {
+		coop_hwnd = notify_hwnd;
+	}
+	if (coop_hwnd) {
+		IDirectInput8W *dinput = nullptr;
+		HINSTANCE hinst = GetModuleHandleW(nullptr);
+		if (SUCCEEDED(DirectInput8Create(hinst, DIRECTINPUT_VERSION, IID_IDirectInput8W,
+						 reinterpret_cast<void **>(&dinput), nullptr)) &&
+		    dinput) {
+			dinput_ = dinput;
+			dinput_hwnd_ = coop_hwnd;
+		} else {
+			dinput_hwnd_ = nullptr;
+		}
+	}
+#endif
 
 	RefreshDevices();
 
@@ -108,7 +597,36 @@ void JoypadInputManager::Stop()
 		poll_thread_.join();
 	}
 
-#if defined(__APPLE__)
+#if defined(_WIN32)
+	{
+		std::lock_guard<std::mutex> lock(devices_mutex_);
+		for (auto &state : device_states_) {
+			auto *dev = static_cast<IDirectInputDevice8W *>(state.di_device);
+			if (dev) {
+				dev->Unacquire();
+				dev->Release();
+				state.di_device = nullptr;
+			}
+		}
+		devices_.clear();
+		device_states_.clear();
+	}
+	if (dinput_) {
+		auto *di = static_cast<IDirectInput8W *>(dinput_);
+		di->Release();
+		dinput_ = nullptr;
+	}
+	unload_xinput_api();
+	if (dinput_devnotify_) {
+		UnregisterDeviceNotification(static_cast<HDEVNOTIFY>(dinput_devnotify_));
+		dinput_devnotify_ = nullptr;
+	}
+	if (dinput_notify_hwnd_) {
+		DestroyWindow(static_cast<HWND>(dinput_notify_hwnd_));
+		dinput_notify_hwnd_ = nullptr;
+	}
+	dinput_hwnd_ = nullptr;
+#elif defined(__APPLE__)
 	if (hid_manager_) {
 		IOHIDManagerClose((IOHIDManagerRef)hid_manager_, kIOHIDOptionsTypeNone);
 		CFRelease((IOHIDManagerRef)hid_manager_);
@@ -155,389 +673,45 @@ void JoypadInputManager::RefreshDevices()
 	};
 
 #ifdef _WIN32
-	auto to_utf8 = [](const TCHAR *value) -> std::string {
-#ifdef UNICODE
-		if (!value || !*value) {
-			return std::string();
-		}
-		int len = WideCharToMultiByte(CP_UTF8, 0, value, -1, nullptr, 0, nullptr, nullptr);
-		if (len <= 0) {
-			return std::string();
-		}
-		std::vector<char> buf(len);
-		WideCharToMultiByte(CP_UTF8, 0, value, -1, buf.data(), len, nullptr, nullptr);
-		return std::string(buf.data());
-#else
-		return value ? std::string(value) : std::string();
-#endif
-	};
-
-	auto query_registry_tstring = [](HKEY root, const TCHAR *subkey,
-					 const TCHAR *value) -> std::basic_string<TCHAR> {
-		HKEY key = nullptr;
-		if (RegOpenKeyEx(root, subkey, 0, KEY_READ, &key) != ERROR_SUCCESS) {
-			return std::basic_string<TCHAR>();
-		}
-
-		DWORD type = 0;
-		DWORD size = 0;
-		if (RegQueryValueEx(key, value, nullptr, &type, nullptr, &size) != ERROR_SUCCESS ||
-		    (type != REG_SZ && type != REG_EXPAND_SZ) || size == 0) {
-			RegCloseKey(key);
-			return std::basic_string<TCHAR>();
-		}
-
-		std::vector<TCHAR> buffer(size / sizeof(TCHAR) + 1, 0);
-		DWORD buf_size = (DWORD)(buffer.size() * sizeof(TCHAR));
-		if (RegQueryValueEx(key, value, nullptr, &type, (LPBYTE)buffer.data(), &buf_size) != ERROR_SUCCESS) {
-			RegCloseKey(key);
-			return std::basic_string<TCHAR>();
-		}
-		buffer.back() = 0;
-		RegCloseKey(key);
-		return std::basic_string<TCHAR>(buffer.data());
-	};
-
-	struct WinmmNameInfo {
-		std::string name;
-		std::string oem_key;
-	};
-
-	auto get_joy_friendly_name = [&](const JOYCAPS &caps, UINT id) -> WinmmNameInfo {
-		WinmmNameInfo out;
-		TCHAR settings_path[MAX_PATH];
-		_stprintf_s(
-			settings_path,
-			TEXT("System\\CurrentControlSet\\Control\\MediaProperties\\PrivateProperties\\Joystick\\JoystickSettings"));
-
-		TCHAR value_name[64];
-		_stprintf_s(value_name, TEXT("Joystick%uOEMName"), id + 1);
-
-		auto key_name = query_registry_tstring(HKEY_CURRENT_USER, settings_path, value_name);
-		if (key_name.empty()) {
-			key_name = query_registry_tstring(HKEY_LOCAL_MACHINE, settings_path, value_name);
-		}
-
-		if (key_name.empty() && caps.szRegKey[0]) {
-			key_name = caps.szRegKey;
-		}
-		out.oem_key = to_utf8(key_name.c_str());
-
-		if (key_name.empty()) {
-			return out;
-		}
-
-		std::basic_string<TCHAR> oem_path =
-			TEXT("System\\CurrentControlSet\\Control\\MediaProperties\\PrivateProperties\\Joystick\\OEM\\") +
-			key_name;
-
-		auto name = query_registry_tstring(HKEY_CURRENT_USER, oem_path.c_str(), TEXT("OEMName"));
-		if (name.empty()) {
-			name = query_registry_tstring(HKEY_LOCAL_MACHINE, oem_path.c_str(), TEXT("OEMName"));
-		}
-		out.name = to_utf8(name.c_str());
-		return out;
-	};
-
-	auto upper_ascii = [](std::string value) {
-		std::transform(value.begin(), value.end(), value.begin(),
-			       [](unsigned char c) { return (char)std::toupper(c); });
-		return value;
-	};
-
-	auto extract_vid_pid_key = [&](const std::string &text, std::string &key_out) -> bool {
-		std::string upper = upper_ascii(text);
-		size_t vid_pos = upper.find("VID_");
-		size_t pid_pos = upper.find("PID_");
-		if (vid_pos == std::string::npos || pid_pos == std::string::npos || vid_pos + 8 > upper.size() ||
-		    pid_pos + 8 > upper.size()) {
-			return false;
-		}
-		key_out = "VID_" + upper.substr(vid_pos + 4, 4) + "&PID_" + upper.substr(pid_pos + 4, 4);
-		return true;
-	};
-
-	auto query_setupapi_hid_name = [&](const std::string &vid_pid_key) -> std::string {
-		if (vid_pid_key.empty()) {
-			return std::string();
-		}
-		auto wide_to_utf8 = [](const wchar_t *value) -> std::string {
-			if (!value || !*value) {
-				return std::string();
-			}
-			int len = WideCharToMultiByte(CP_UTF8, 0, value, -1, nullptr, 0, nullptr, nullptr);
-			if (len <= 0) {
-				return std::string();
-			}
-			std::vector<char> out((size_t)len);
-			WideCharToMultiByte(CP_UTF8, 0, value, -1, out.data(), len, nullptr, nullptr);
-			return std::string(out.data());
-		};
-		auto score_name = [&](const std::string &name, bool is_friendly) -> int {
-			if (name.empty()) {
-				return -1000;
-			}
-			std::string lower = name;
-			std::transform(lower.begin(), lower.end(), lower.begin(),
-				       [](unsigned char c) { return (char)std::tolower(c); });
-			int score = is_friendly ? 10 : 0;
-			const char *good_tokens[] = {"arduino",  "logitech", "xbox",      "controller", "gamepad",
-						     "joystick", "wheel",    "dualshock", "dualsense"};
-			for (const char *token : good_tokens) {
-				if (lower.find(token) != std::string::npos) {
-					score += 20;
-				}
-			}
-			const char *generic_tokens[] = {"usb input device",
-							"hid-compliant game controller",
-							"hid compliant game controller",
-							"microsoft pc-joystick driver",
-							"controlador de jogo compat",
-							"dispositivo de entrada usb"};
-			for (const char *token : generic_tokens) {
-				if (lower.find(token) != std::string::npos) {
-					score -= 40;
-				}
-			}
-			return score;
-		};
-
-		GUID hid_guid = {};
-		HidD_GetHidGuid(&hid_guid);
-		HDEVINFO devinfo =
-			SetupDiGetClassDevsA(&hid_guid, nullptr, nullptr, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
-		if (devinfo == INVALID_HANDLE_VALUE) {
-			return std::string();
-		}
-
-		auto read_prop = [&](SP_DEVINFO_DATA &dev_data, DWORD prop) -> std::string {
-			char buf[1024] = {};
-			DWORD reg_type = 0;
-			if (!SetupDiGetDeviceRegistryPropertyA(devinfo, &dev_data, prop, &reg_type, (PBYTE)buf,
-							       (DWORD)sizeof(buf), nullptr)) {
-				return std::string();
-			}
-			return std::string(buf);
-		};
-
-		const std::string needle = upper_ascii(vid_pid_key);
-		std::string best_name;
-		int best_score = -1000;
-		for (DWORD idx = 0;; ++idx) {
-			SP_DEVICE_INTERFACE_DATA iface_data = {};
-			iface_data.cbSize = sizeof(iface_data);
-			if (!SetupDiEnumDeviceInterfaces(devinfo, nullptr, &hid_guid, idx, &iface_data)) {
-				break;
-			}
-
-			DWORD required = 0;
-			SetupDiGetDeviceInterfaceDetailA(devinfo, &iface_data, nullptr, 0, &required, nullptr);
-			if (required < sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_A)) {
-				continue;
-			}
-			std::vector<char> detail_buf(required);
-			auto *detail = reinterpret_cast<SP_DEVICE_INTERFACE_DETAIL_DATA_A *>(detail_buf.data());
-			detail->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_A);
-			SP_DEVINFO_DATA dev_data = {};
-			dev_data.cbSize = sizeof(dev_data);
-			if (!SetupDiGetDeviceInterfaceDetailA(devinfo, &iface_data, detail, required, nullptr,
-							      &dev_data)) {
-				continue;
-			}
-
-			const std::string path = upper_ascii(std::string(detail->DevicePath));
-			if (path.find(needle) == std::string::npos) {
-				continue;
-			}
-
-			const std::string friendly = read_prop(dev_data, SPDRP_FRIENDLYNAME);
-			const std::string desc = read_prop(dev_data, SPDRP_DEVICEDESC);
-			const std::string mfg = read_prop(dev_data, SPDRP_MFG);
-
-			const std::string candidates[] = {friendly, desc, mfg};
-			for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); ++i) {
-				const std::string &candidate = candidates[i];
-				if (candidate.empty()) {
-					continue;
-				}
-				int score = score_name(candidate, i == 0);
-				if (score > best_score) {
-					best_score = score;
-					best_name = candidate;
-				}
-			}
-
-			HANDLE hid_handle = CreateFileA(detail->DevicePath, 0, FILE_SHARE_READ | FILE_SHARE_WRITE,
-							nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-			if (hid_handle != INVALID_HANDLE_VALUE) {
-				wchar_t product[256] = {};
-				if (HidD_GetProductString(hid_handle, product, sizeof(product))) {
-					const std::string product_name = wide_to_utf8(product);
-					int score = score_name(product_name, true) + 15;
-					if (score > best_score) {
-						best_score = score;
-						best_name = product_name;
-					}
-				}
-				CloseHandle(hid_handle);
+	IDirectInput8W *dinput = static_cast<IDirectInput8W *>(dinput_);
+	HWND hwnd = static_cast<HWND>(dinput_hwnd_);
+	if (!dinput || !hwnd) {
+		for (auto &old_state : device_states_) {
+			auto *dev = static_cast<IDirectInputDevice8W *>(old_state.di_device);
+			if (dev) {
+				dev->Unacquire();
+				dev->Release();
 			}
 		}
-		SetupDiDestroyDeviceInfoList(devinfo);
-		return best_name;
-	};
+		devices_.clear();
+		device_states_.clear();
+		return;
+	}
 
-	auto query_setupapi_usb_name = [&](const std::string &vid_pid_key) -> std::string {
-		if (vid_pid_key.empty()) {
-			return std::string();
-		}
+	auto xinput_controllers = enumerate_xinput_controllers();
+	auto controllers = enumerate_dinput_controllers(dinput, hwnd);
+	std::unordered_set<std::string> seen_ids;
+	seen_ids.reserve(controllers.size() + xinput_controllers.size());
 
-		auto score_name = [&](const std::string &name, bool is_friendly) -> int {
-			if (name.empty()) {
-				return -1000;
-			}
-			std::string lower = name;
-			std::transform(lower.begin(), lower.end(), lower.begin(),
-				       [](unsigned char c) { return (char)std::tolower(c); });
-			int score = is_friendly ? 12 : 0;
-			const char *good_tokens[] = {"arduino",  "logitech", "xbox",      "controller", "gamepad",
-						     "joystick", "wheel",    "dualshock", "dualsense",  "usb"};
-			for (const char *token : good_tokens) {
-				if (lower.find(token) != std::string::npos) {
-					score += 16;
-				}
-			}
-			const char *generic_tokens[] = {"usb composite device", "usb input device", "generic usb hub"};
-			for (const char *token : generic_tokens) {
-				if (lower.find(token) != std::string::npos) {
-					score -= 30;
-				}
-			}
-			return score;
-		};
-
-		HDEVINFO devinfo = SetupDiGetClassDevsA(&GUID_DEVCLASS_USB, nullptr, nullptr, DIGCF_PRESENT);
-		if (devinfo == INVALID_HANDLE_VALUE) {
-			return std::string();
-		}
-
-		auto read_prop = [&](SP_DEVINFO_DATA &dev_data, DWORD prop) -> std::string {
-			char buf[1024] = {};
-			DWORD reg_type = 0;
-			if (!SetupDiGetDeviceRegistryPropertyA(devinfo, &dev_data, prop, &reg_type, (PBYTE)buf,
-							       (DWORD)sizeof(buf), nullptr)) {
-				return std::string();
-			}
-			return std::string(buf);
-		};
-
-		const std::string needle = upper_ascii(vid_pid_key);
-		std::string best_name;
-		int best_score = -1000;
-		for (DWORD i = 0;; ++i) {
-			SP_DEVINFO_DATA dev_data = {};
-			dev_data.cbSize = sizeof(dev_data);
-			if (!SetupDiEnumDeviceInfo(devinfo, i, &dev_data)) {
-				break;
-			}
-
-			char hardware_ids[4096] = {};
-			DWORD reg_type = 0;
-			if (!SetupDiGetDeviceRegistryPropertyA(devinfo, &dev_data, SPDRP_HARDWAREID, &reg_type,
-							       (PBYTE)hardware_ids, (DWORD)sizeof(hardware_ids),
-							       nullptr)) {
-				continue;
-			}
-
-			bool match = false;
-			for (char *p = hardware_ids; *p; p += strlen(p) + 1) {
-				std::string hw = upper_ascii(std::string(p));
-				if (hw.find(needle) != std::string::npos) {
-					match = true;
-					break;
-				}
-			}
-			if (!match) {
-				continue;
-			}
-
-			const std::string friendly = read_prop(dev_data, SPDRP_FRIENDLYNAME);
-			const std::string desc = read_prop(dev_data, SPDRP_DEVICEDESC);
-			const std::string mfg = read_prop(dev_data, SPDRP_MFG);
-			const std::string candidates[] = {friendly, desc, mfg};
-			for (size_t k = 0; k < sizeof(candidates) / sizeof(candidates[0]); ++k) {
-				const std::string &candidate = candidates[k];
-				if (candidate.empty()) {
-					continue;
-				}
-				int score = score_name(candidate, k == 0);
-				if (score > best_score) {
-					best_score = score;
-					best_name = candidate;
-				}
-			}
-		}
-
-		SetupDiDestroyDeviceInfoList(devinfo);
-		return best_name;
-	};
-
-	UINT count = joyGetNumDevs();
-	for (UINT id = 0; id < count; ++id) {
-		JOYCAPS caps = {};
-		if (joyGetDevCaps(id, &caps, sizeof(caps)) != JOYERR_NOERROR) {
-			continue;
-		}
-		caps.szPname[(sizeof(caps.szPname) / sizeof(TCHAR)) - 1] = 0;
-		caps.szRegKey[(sizeof(caps.szRegKey) / sizeof(TCHAR)) - 1] = 0;
-		std::string dev_id = "winmm:" + std::to_string(id);
+	for (const auto &xinfo : xinput_controllers) {
+		seen_ids.insert(xinfo.id);
 		DeviceState state;
-		DeviceState *existing = find_existing(dev_id);
-		std::string resolved_name = to_utf8(caps.szPname);
-		WinmmNameInfo friendly_info = get_joy_friendly_name(caps, id);
-		if (!friendly_info.name.empty()) {
-			resolved_name = friendly_info.name;
-		}
-		std::string vid_pid_key;
-		if (!extract_vid_pid_key(friendly_info.oem_key, vid_pid_key) &&
-		    !extract_vid_pid_key(to_utf8(caps.szRegKey), vid_pid_key)) {
-			extract_vid_pid_key(resolved_name, vid_pid_key);
-		}
-		std::string setup_name = query_setupapi_hid_name(vid_pid_key);
-		if (setup_name.empty()) {
-			setup_name = query_setupapi_usb_name(vid_pid_key);
-		}
-		if (!setup_name.empty()) {
-			resolved_name = setup_name;
-		}
+		DeviceState *existing = find_existing(xinfo.id);
 		if (existing) {
 			state = *existing;
 		} else {
-			state.winmm_id = (int)id;
-			state.id = dev_id;
-			state.name = resolved_name;
-			state.connected = true;
 			for (size_t k = 0; k < 8; ++k) {
 				state.axis_initialized[k] = false;
 			}
 		}
-		state.id = dev_id;
-		state.winmm_id = (int)id;
+		state.id = xinfo.id;
+		state.stable_id = xinfo.stable_id;
+		state.type_id = xinfo.type_id;
+		state.name = xinfo.name;
 		state.connected = true;
-		state.name = resolved_name;
-		state.type_id = build_winmm_type_id(caps, vid_pid_key);
-		state.stable_id = build_winmm_stable_id(caps, state.name, to_utf8(caps.szRegKey));
-		state.axis_min[0] = caps.wXmin;
-		state.axis_max[0] = caps.wXmax;
-		state.axis_min[1] = caps.wYmin;
-		state.axis_max[1] = caps.wYmax;
-		state.axis_min[2] = caps.wZmin;
-		state.axis_max[2] = caps.wZmax;
-		state.axis_min[3] = caps.wRmin;
-		state.axis_max[3] = caps.wRmax;
-		state.axis_min[4] = caps.wUmin;
-		state.axis_max[4] = caps.wUmax;
-		state.axis_min[5] = caps.wVmin;
-		state.axis_max[5] = caps.wVmax;
+		state.di_device = nullptr;
+		state.is_xinput = true;
+		state.xinput_slot = xinfo.slot;
 
 		JoypadDeviceInfo info;
 		info.id = state.id;
@@ -546,6 +720,60 @@ void JoypadInputManager::RefreshDevices()
 		info.name = state.name;
 		next_devices.push_back(info);
 		next_states.push_back(state);
+	}
+
+	for (const auto &controller : controllers) {
+		if (is_xinput_shadow_device(controller, xinput_controllers)) {
+			if (controller.device) {
+				controller.device->Unacquire();
+				controller.device->Release();
+			}
+			continue;
+		}
+		seen_ids.insert(controller.id);
+		DeviceState state;
+		DeviceState *existing = find_existing(controller.id);
+		IDirectInputDevice8W *old_dev = existing ? static_cast<IDirectInputDevice8W *>(existing->di_device)
+							 : nullptr;
+		if (existing) {
+			state = *existing;
+		} else {
+			for (size_t k = 0; k < 8; ++k) {
+				state.axis_initialized[k] = false;
+			}
+		}
+
+		state.id = controller.id;
+		state.stable_id = controller.stable_id;
+		state.type_id = controller.type_id;
+		state.name = controller.name;
+		state.connected = true;
+		state.di_device = controller.device;
+		state.is_xinput = false;
+		state.xinput_slot = 0;
+		if (old_dev && old_dev != controller.device) {
+			old_dev->Unacquire();
+			old_dev->Release();
+		}
+
+		JoypadDeviceInfo info;
+		info.id = state.id;
+		info.stable_id = state.stable_id;
+		info.type_id = state.type_id;
+		info.name = state.name;
+		next_devices.push_back(info);
+		next_states.push_back(state);
+	}
+
+	for (auto &old_state : device_states_) {
+		if (seen_ids.find(old_state.id) != seen_ids.end()) {
+			continue;
+		}
+		auto *dev = static_cast<IDirectInputDevice8W *>(old_state.di_device);
+		if (dev) {
+			dev->Unacquire();
+			dev->Release();
+		}
 	}
 #elif defined(__linux__)
 	DIR *dir = opendir("/dev/input");
@@ -564,6 +792,17 @@ void JoypadInputManager::RefreshDevices()
 		DeviceState *existing = find_existing(id);
 		if (existing) {
 			state = *existing;
+			if (state.fd < 0) {
+				int fd = open(path.c_str(), O_RDONLY | O_NONBLOCK);
+				if (fd < 0) {
+					continue;
+				}
+				state.fd = fd;
+				char name[128] = {};
+				if (ioctl(fd, JSIOCGNAME(sizeof(name)), name) >= 0 && name[0] != '\0') {
+					state.name = name;
+				}
+			}
 		} else {
 			int fd = open(path.c_str(), O_RDONLY | O_NONBLOCK);
 			if (fd < 0) {
@@ -583,6 +822,7 @@ void JoypadInputManager::RefreshDevices()
 				state.axis_initialized[k] = false;
 			}
 		}
+		state.connected = true;
 		state.stable_id = state.id;
 		state.type_id = state.id;
 
@@ -700,10 +940,6 @@ void JoypadInputManager::MarkDeviceDisconnected(DeviceState &state)
 {
 	state.connected = false;
 	state.last_buttons = 0;
-	for (int i = 0; i < kMaxTrackedAxes; ++i) {
-		state.last_axes[i] = 0.0;
-		state.axis_initialized[i] = false;
-	}
 }
 
 void JoypadInputManager::PollLoop()
@@ -716,21 +952,84 @@ void JoypadInputManager::PollLoop()
 		{
 			std::lock_guard<std::mutex> lock(devices_mutex_);
 			for (auto &state : device_states_) {
-				JOYINFOEX info = {};
-				info.dwSize = sizeof(info);
-				info.dwFlags = JOY_RETURNBUTTONS | JOY_RETURNX | JOY_RETURNY | JOY_RETURNZ |
-					       JOY_RETURNR | JOY_RETURNU | JOY_RETURNV;
-				MMRESULT res = joyGetPosEx((UINT)state.winmm_id, &info);
-				if (res != JOYERR_NOERROR) {
-					MarkDeviceDisconnected(state);
-					continue;
+				uint32_t buttons = 0;
+				std::array<double, kMaxTrackedAxes> axis_values = {0.0, 0.0, 0.0, 0.0,
+										   0.0, 0.0, 0.0, 0.0};
+				int axes_to_read = kMaxTrackedAxes;
+				uint32_t digital_count = 20;
+
+				if (state.is_xinput) {
+					if (!xinput_ready()) {
+						continue;
+					}
+					XINPUT_STATE xstate = {};
+					if (g_xinput_api.get_state(state.xinput_slot, &xstate) != ERROR_SUCCESS) {
+						continue;
+					}
+					state.connected = true;
+					digital_count = 14;
+					axes_to_read = 6;
+					xinput_read_buttons_axes(xstate, buttons, axis_values);
+				} else {
+					auto *dev = static_cast<IDirectInputDevice8W *>(state.di_device);
+					if (!dev) {
+						MarkDeviceDisconnected(state);
+						continue;
+					}
+
+					HRESULT hr = dev->Poll();
+					if (FAILED(hr)) {
+						hr = dev->Acquire();
+						// Avoid infinite loops when device is unplugged/lost.
+						for (int tries = 0; hr == DIERR_INPUTLOST && tries < 8; ++tries) {
+							hr = dev->Acquire();
+						}
+						hr = dev->Poll();
+					}
+					if (FAILED(hr)) {
+						// Disconnection detection is event-driven (WM_DEVICECHANGE).
+						continue;
+					}
+
+					DIJOYSTATE2 js = {};
+					hr = dev->GetDeviceState(sizeof(js), &js);
+					if (FAILED(hr)) {
+						// Disconnection detection is event-driven (WM_DEVICECHANGE).
+						continue;
+					}
+					state.connected = true;
+
+					for (uint32_t i = 0; i < 16; ++i) {
+						if (js.rgbButtons[i] & 0x80) {
+							buttons |= (1u << i);
+						}
+					}
+
+					DWORD pov = js.rgdwPOV[0];
+					if (LOWORD(pov) != 0xFFFF) {
+						if (pov <= 4500 || pov >= 31500)
+							buttons |= (1u << 16); // up
+						if (pov >= 4500 && pov <= 13500)
+							buttons |= (1u << 17); // right
+						if (pov >= 13500 && pov <= 22500)
+							buttons |= (1u << 18); // down
+						if (pov >= 22500 && pov <= 31500)
+							buttons |= (1u << 19); // left
+					}
+
+					axis_values[0] = std::clamp((double)js.lX / 1000.0, -1.0, 1.0);
+					axis_values[1] = std::clamp((double)js.lY / 1000.0, -1.0, 1.0);
+					axis_values[2] = std::clamp((double)js.lZ / 1000.0, -1.0, 1.0);
+					axis_values[3] = std::clamp((double)js.lRx / 1000.0, -1.0, 1.0);
+					axis_values[4] = std::clamp((double)js.lRy / 1000.0, -1.0, 1.0);
+					axis_values[5] = std::clamp((double)js.lRz / 1000.0, -1.0, 1.0);
+					axis_values[6] = std::clamp((double)js.rglSlider[0] / 1000.0, -1.0, 1.0);
+					axis_values[7] = std::clamp((double)js.rglSlider[1] / 1000.0, -1.0, 1.0);
 				}
 
-				state.connected = true;
-				uint32_t buttons = (uint32_t)info.dwButtons;
 				uint32_t changed = buttons & ~state.last_buttons;
 				if (changed) {
-					for (int bit = 0; bit < 32; ++bit) {
+					for (uint32_t bit = 0; bit < digital_count; ++bit) {
 						if (changed & (1u << bit)) {
 							JoypadEvent event;
 							event.device_id = state.id;
@@ -744,43 +1043,9 @@ void JoypadInputManager::PollLoop()
 				}
 				state.last_buttons = buttons;
 
-				auto norm_axis = [&state](int idx, DWORD val) {
-					int minv = state.axis_min[idx];
-					int maxv = state.axis_max[idx];
-					if (maxv <= minv) {
-						return 0.0;
-					}
-					double out = ((double)val - minv) / (double)(maxv - minv) * 2.0 - 1.0;
-					return std::clamp(out, -1.0, 1.0);
-				};
-
-				double axes[6] = {norm_axis(0, info.dwXpos), norm_axis(1, info.dwYpos),
-						  norm_axis(2, info.dwZpos), norm_axis(3, info.dwRpos),
-						  norm_axis(4, info.dwUpos), norm_axis(5, info.dwVpos)};
-
-				for (int i = 0; i < 6; ++i) {
-					double value = axes[i];
-					double raw = 0.0;
-					switch (i) {
-					case 0:
-						raw = info.dwXpos;
-						break;
-					case 1:
-						raw = info.dwYpos;
-						break;
-					case 2:
-						raw = info.dwZpos;
-						break;
-					case 3:
-						raw = info.dwRpos;
-						break;
-					case 4:
-						raw = info.dwUpos;
-						break;
-					case 5:
-						raw = info.dwVpos;
-						break;
-					}
+				for (int i = 0; i < axes_to_read; ++i) {
+					double normalized = axis_values[(size_t)i];
+					double raw = ((normalized + 1.0) * 0.5) * 1024.0;
 					std::string key = state.id + ":" + std::to_string(i) + (raw >= 0.0 ? "+" : "-");
 					auto now = std::chrono::steady_clock::now();
 					auto it = axis_last_trigger_.find(key);
@@ -790,7 +1055,7 @@ void JoypadInputManager::PollLoop()
 						continue;
 					}
 					double prev_raw = state.last_axes[i];
-					if (raw == prev_raw) {
+					if (std::fabs(raw - prev_raw) < 0.000001) {
 						continue;
 					}
 					if (it != axis_last_trigger_.end() &&
@@ -807,10 +1072,15 @@ void JoypadInputManager::PollLoop()
 					event.device_name = state.name;
 					event.is_axis = true;
 					event.axis_index = i;
-					event.axis_value = value;
+					event.axis_value = normalized;
 					event.axis_raw_value = raw;
 					DispatchAxisAbsolute(event);
 					state.last_axes[i] = raw;
+				}
+
+				for (int i = axes_to_read; i < kMaxTrackedAxes; ++i) {
+					state.axis_initialized[i] = false;
+					state.last_axes[i] = 0.0;
 				}
 			}
 		}
@@ -1062,6 +1332,10 @@ void JoypadInputManager::PollLoop()
 								}
 							}
 						}
+						if (device_id.empty()) {
+							// Device may have been removed between callback delivery and lookup.
+							return;
+						}
 
 						JoypadEvent event;
 						event.device_id = device_id;
@@ -1189,11 +1463,24 @@ void JoypadInputManager::PollLoop()
 		CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.05, true);
 #endif
 
-		auto now = std::chrono::steady_clock::now();
+		[[maybe_unused]] auto now = std::chrono::steady_clock::now();
+#if defined(_WIN32)
+		if (dinput_notify_hwnd_) {
+			MSG msg;
+			while (PeekMessageW(&msg, static_cast<HWND>(dinput_notify_hwnd_), 0, 0, PM_REMOVE)) {
+				TranslateMessage(&msg);
+				DispatchMessageW(&msg);
+			}
+		}
+		if (device_change_pending_.exchange(false)) {
+			RefreshDevices();
+		}
+#else
 		if (now - last_refresh > std::chrono::seconds(4)) {
 			RefreshDevices();
 			last_refresh = now;
 		}
+#endif
 
 		std::this_thread::sleep_for(std::chrono::milliseconds(20));
 	}

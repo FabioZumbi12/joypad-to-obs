@@ -51,6 +51,7 @@ public:
 	int AddOnAxisChanged(std::function<void(const JoypadEvent &)> handler);
 	void RemoveOnAxisChanged(int handler_id);
 	bool GetAxisRawValue(const std::string &device_id, int axis_index, double &raw_out) const;
+	void SetNativeWindowHandle(void *hwnd);
 
 	bool BeginLearn(std::function<void(const JoypadEvent &)> handler);
 	void CancelLearn();
@@ -65,10 +66,10 @@ private:
 		double last_axes[8] = {0};
 		bool axis_initialized[8] = {false};
 		bool connected = false;
-		int winmm_id = -1;
-#ifdef _WIN32
-		int axis_min[6] = {0, 0, 0, 0, 0, 0};
-		int axis_max[6] = {0, 0, 0, 0, 0, 0};
+#if defined(_WIN32)
+		void *di_device = nullptr;
+		bool is_xinput = false;
+		uint32_t xinput_slot = 0;
 #endif
 #if defined(__linux__)
 		int fd = -1;
@@ -99,6 +100,15 @@ private:
 	int next_axis_handler_id_ = 1;
 	std::vector<AxisHandlerEntry> axis_handlers_;
 	std::unordered_map<std::string, std::chrono::steady_clock::time_point> axis_last_trigger_;
+
+#if defined(_WIN32)
+	void *dinput_ = nullptr;
+	void *dinput_hwnd_ = nullptr;
+	void *dinput_notify_hwnd_ = nullptr;
+	void *dinput_devnotify_ = nullptr;
+	void *native_hwnd_ = nullptr;
+	std::atomic<bool> device_change_pending_{false};
+#endif
 
 #if defined(__APPLE__)
 	void *hid_manager_ = nullptr;

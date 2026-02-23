@@ -87,8 +87,17 @@ bool looks_generic_device_name(const QString &name, const QString &type_id)
 	}
 
 	const QString lower = name.trimmed().toLower();
-	return lower.isEmpty() || lower.contains("pc-joystick") || lower.contains("usb input device") ||
-	       lower.contains("hid-compliant") || lower.contains("hid compliant") || lower.contains("game controller");
+	if (lower.isEmpty()) {
+		return true;
+	}
+
+	// "Controller" alone is too generic in practice and should include type info in label.
+	if (lower == "controller" || lower == "gamepad" || lower == "joystick") {
+		return true;
+	}
+
+	return lower.contains("pc-joystick") || lower.contains("usb input device") || lower.contains("hid-compliant") ||
+	       lower.contains("hid compliant");
 }
 
 QString format_device_label(const QString &name, const QString &type_id)
@@ -104,12 +113,8 @@ QString format_device_label(const QString &name, const QString &type_id)
 		}
 		return generic;
 	}
-	if (!type_id.isEmpty()) {
-		if (base.contains("[" + type_id + "]", Qt::CaseInsensitive)) {
-			return base;
-		}
-		return QString("%1 [%2]").arg(base, type_id);
-	}
+	// When we already have a readable device name (e.g. from WGI),
+	// avoid appending VID/PID noise to the UI label.
 	return base;
 }
 
@@ -393,16 +398,7 @@ public:
 		auto *device_layout = new QGridLayout(device_group);
 
 		device_combo_ = new QComboBox(device_group);
-		device_combo_->addItem(L("JoypadToOBS.Common.AnyDevice"), QString());
-		device_combo_->setItemData(0, QString(), kDeviceStableIdRole);
-		device_combo_->setItemData(0, QString(), kDeviceTypeIdRole);
-
-		for (const auto &device : input_->GetDevices()) {
-			const int idx = device_combo_->count();
-			device_combo_->addItem(device_label_from_info(device), QString::fromStdString(device.id));
-			device_combo_->setItemData(idx, QString::fromStdString(device.stable_id), kDeviceStableIdRole);
-			device_combo_->setItemData(idx, QString::fromStdString(device.type_id), kDeviceTypeIdRole);
-		}
+		PopulateDeviceCombo();
 
 		button_label_ = new QLabel(L("JoypadToOBS.Common.NoButtonSelected"), device_group);
 		listen_button_ = new QPushButton(L("JoypadToOBS.Common.Listen"), device_group);
@@ -657,9 +653,6 @@ public:
 			UpdateAxisUi(false);
 		}
 		PublishTestBinding();
-		refresh_timer_ = new QTimer(this);
-		connect(refresh_timer_, &QTimer::timeout, this, &JoypadBindingDialog::RefreshDeviceList);
-		refresh_timer_->start(1000);
 	}
 
 	~JoypadBindingDialog() override
@@ -667,10 +660,6 @@ public:
 		{
 			std::lock_guard<std::mutex> lock(g_dialog_test_mutex);
 			g_dialog_test_state.enabled = false;
-		}
-		if (refresh_timer_) {
-			refresh_timer_->stop();
-			refresh_timer_ = nullptr;
 		}
 		if (input_) {
 			input_->CancelLearn();
@@ -716,36 +705,17 @@ private:
 		g_dialog_test_state.binding = test;
 	}
 
-	void RefreshDeviceList()
+	void PopulateDeviceCombo()
 	{
-		if (!input_) {
-			return;
-		}
-		auto devices = input_->GetDevices();
-		bool changed = false;
-		if (device_combo_->count() - 1 != (int)devices.size()) {
-			changed = true;
-		} else {
-			for (size_t i = 0; i < devices.size(); ++i) {
-				QString id = device_combo_->itemData((int)i + 1, kDeviceIdRole).toString();
-				if (id.toStdString() != devices[i].id) {
-					changed = true;
-					break;
-				}
-			}
-		}
-
-		if (changed) {
-			QString current_id = device_combo_->currentData(kDeviceIdRole).toString();
-			QString current_stable = device_combo_->currentData(kDeviceStableIdRole).toString();
-			QString current_type = device_combo_->currentData(kDeviceTypeIdRole).toString();
-			QString current_text = device_combo_->currentText();
-			device_combo_->blockSignals(true);
-			device_combo_->clear();
-			device_combo_->addItem(L("JoypadToOBS.Common.AnyDevice"), QString());
-			device_combo_->setItemData(0, QString(), kDeviceStableIdRole);
-			device_combo_->setItemData(0, QString(), kDeviceTypeIdRole);
-			for (const auto &device : devices) {
+		device_combo_->blockSignals(true);
+		device_combo_->clear();
+		device_combo_->addItem(L("JoypadToOBS.Common.AnyDevice"), QString());
+		device_combo_->setItemData(0, QString(), kDeviceStableIdRole);
+		device_combo_->setItemData(0, QString(), kDeviceTypeIdRole);
+		if (input_) {
+			// Ensure the combobox reflects devices connected right now.
+			input_->RefreshDevices();
+			for (const auto &device : input_->GetDevices()) {
 				const int idx = device_combo_->count();
 				device_combo_->addItem(device_label_from_info(device),
 						       QString::fromStdString(device.id));
@@ -754,21 +724,8 @@ private:
 				device_combo_->setItemData(idx, QString::fromStdString(device.type_id),
 							   kDeviceTypeIdRole);
 			}
-			int idx = device_combo_->findData(current_id, kDeviceIdRole);
-			if (idx < 0 && !current_stable.isEmpty()) {
-				idx = device_combo_->findData(current_stable, kDeviceStableIdRole);
-			}
-			if (idx >= 0) {
-				device_combo_->setCurrentIndex(idx);
-			} else if (!current_id.isEmpty()) {
-				device_combo_->addItem(current_text, current_id);
-				const int extra = device_combo_->count() - 1;
-				device_combo_->setItemData(extra, current_stable, kDeviceStableIdRole);
-				device_combo_->setItemData(extra, current_type, kDeviceTypeIdRole);
-				device_combo_->setCurrentIndex(device_combo_->count() - 1);
-			}
-			device_combo_->blockSignals(false);
 		}
+		device_combo_->blockSignals(false);
 	}
 
 	double MapRawToPercent(double raw) const
@@ -1326,7 +1283,6 @@ private:
 	QCheckBox *invert_axis_checkbox_ = nullptr;
 	QCheckBox *test_mode_checkbox_ = nullptr;
 	int axis_handler_id_ = 0;
-	QTimer *refresh_timer_ = nullptr;
 	bool is_listening_ = false;
 };
 
