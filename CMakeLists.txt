@@ -33,21 +33,30 @@ include(helpers)
 
 add_library(${CMAKE_PROJECT_NAME} MODULE)
 
-# CI fallback: resolve OBS package configs from local dependency install path.
-if(NOT libobs_DIR AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.deps/cmake/libobs/libobsConfig.cmake")
-  set(libobs_DIR "${CMAKE_CURRENT_SOURCE_DIR}/.deps/cmake/libobs" CACHE PATH "Path to libobs CMake package" FORCE)
+# CI fallback: resolve OBS package config locations from local dependency tree.
+set(_deps_root "${CMAKE_CURRENT_SOURCE_DIR}/.deps")
+if(EXISTS "${_deps_root}")
+  list(APPEND CMAKE_PREFIX_PATH "${_deps_root}" "${_deps_root}/cmake")
 endif()
-if(
-  NOT obs-frontend-api_DIR
-  AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.deps/cmake/obs-frontend-api/obs-frontend-apiConfig.cmake"
-)
-  set(
-    obs-frontend-api_DIR
-    "${CMAKE_CURRENT_SOURCE_DIR}/.deps/cmake/obs-frontend-api"
-    CACHE PATH
-    "Path to obs-frontend-api CMake package"
-    FORCE
-  )
+
+if(NOT libobs_DIR)
+  file(GLOB_RECURSE _libobs_cfg_candidates "${_deps_root}/*libobsConfig.cmake")
+  list(LENGTH _libobs_cfg_candidates _libobs_cfg_count)
+  if(_libobs_cfg_count GREATER 0)
+    list(GET _libobs_cfg_candidates 0 _libobs_cfg)
+    get_filename_component(_libobs_cfg_dir "${_libobs_cfg}" DIRECTORY)
+    set(libobs_DIR "${_libobs_cfg_dir}" CACHE PATH "Path to libobs CMake package" FORCE)
+  endif()
+endif()
+
+if(ENABLE_FRONTEND_API AND NOT DEFINED obs-frontend-api_DIR)
+  file(GLOB_RECURSE _frontend_cfg_candidates "${_deps_root}/*obs-frontend-apiConfig.cmake")
+  list(LENGTH _frontend_cfg_candidates _frontend_cfg_count)
+  if(_frontend_cfg_count GREATER 0)
+    list(GET _frontend_cfg_candidates 0 _frontend_cfg)
+    get_filename_component(_frontend_cfg_dir "${_frontend_cfg}" DIRECTORY)
+    set(obs-frontend-api_DIR "${_frontend_cfg_dir}" CACHE PATH "Path to obs-frontend-api CMake package" FORCE)
+  endif()
 endif()
 
 find_package(libobs REQUIRED)
