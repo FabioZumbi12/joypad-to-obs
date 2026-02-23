@@ -51,6 +51,129 @@ JoypadActionEngine g_actions;
 
 QAction *g_tools_action = nullptr;
 JoypadToolsDialog *g_dialog = nullptr;
+obs_hotkey_id g_toggle_input_listening_hotkey_id = OBS_INVALID_HOTKEY_ID;
+
+constexpr const char *kToggleInputListeningHotkeySaveKey = "toggle_input_listening_hotkey";
+
+QString BuildOsdStyle(const QString &text_color, const QString &background_color, int font_size);
+QString ToCssColor(const QString &input, const QString &fallback);
+
+void ShowOsdNotification(const QString &text)
+{
+	if (!g_config.GetOsdEnabled()) {
+		return;
+	}
+
+	QCoreApplication *app = QCoreApplication::instance();
+	if (!app) {
+		return;
+	}
+
+	QMetaObject::invokeMethod(app, [text]() {
+		QWidget *main_window = (QWidget *)obs_frontend_get_main_window();
+		if (!main_window) {
+			return;
+		}
+
+		QLabel *label = new QLabel(main_window);
+		label->setWindowFlags(Qt::ToolTip | Qt::FramelessWindowHint);
+		label->setAttribute(Qt::WA_ShowWithoutActivating);
+		label->setAttribute(Qt::WA_StyledBackground, true);
+		label->setAutoFillBackground(true);
+		QString color = ToCssColor(QString::fromStdString(g_config.GetOsdColor()), "#ffffff");
+		QString background_color =
+			ToCssColor(QString::fromStdString(g_config.GetOsdBackgroundColor()), "rgba(0, 0, 0, 230)");
+		int size = g_config.GetOsdFontSize();
+		label->setStyleSheet(BuildOsdStyle(color, background_color, size));
+		label->setText(text);
+		label->adjustSize();
+
+		QRect r = main_window->geometry();
+		int m = 40; // Margin
+		int x = 0;
+		int y = 0;
+		int w = label->width();
+		int h = label->height();
+
+		switch (g_config.GetOsdPosition()) {
+		case JoypadOsdPosition::TopLeft:
+			x = r.x() + m;
+			y = r.y() + m;
+			break;
+		case JoypadOsdPosition::TopCenter:
+			x = r.x() + (r.width() - w) / 2;
+			y = r.y() + m;
+			break;
+		case JoypadOsdPosition::TopRight:
+			x = r.x() + r.width() - w - m;
+			y = r.y() + m;
+			break;
+		case JoypadOsdPosition::CenterLeft:
+			x = r.x() + m;
+			y = r.y() + (r.height() - h) / 2;
+			break;
+		case JoypadOsdPosition::Center:
+			x = r.x() + (r.width() - w) / 2;
+			y = r.y() + (r.height() - h) / 2;
+			break;
+		case JoypadOsdPosition::CenterRight:
+			x = r.x() + r.width() - w - m;
+			y = r.y() + (r.height() - h) / 2;
+			break;
+		case JoypadOsdPosition::BottomLeft:
+			x = r.x() + m;
+			y = r.y() + r.height() - h - m;
+			break;
+		case JoypadOsdPosition::BottomCenter:
+			x = r.x() + (r.width() - w) / 2;
+			y = r.y() + r.height() - h - m;
+			break;
+		case JoypadOsdPosition::BottomRight:
+			x = r.x() + r.width() - w - m;
+			y = r.y() + r.height() - h - m;
+			break;
+		}
+		label->move(x, y);
+		label->setWindowOpacity(0.0);
+		label->show();
+
+		auto *fade_in = new QPropertyAnimation(label, "windowOpacity");
+		fade_in->setDuration(180);
+		fade_in->setStartValue(0.0);
+		fade_in->setEndValue(1.0);
+		fade_in->setEasingCurve(QEasingCurve::InOutQuad);
+
+		auto *fade_out = new QPropertyAnimation(label, "windowOpacity");
+		fade_out->setDuration(600);
+		fade_out->setStartValue(1.0);
+		fade_out->setEndValue(0.0);
+		fade_out->setEasingCurve(QEasingCurve::OutCubic);
+
+		auto *anim_group = new QSequentialAnimationGroup(label);
+		anim_group->addAnimation(fade_in);
+		anim_group->addPause(1700);
+		anim_group->addAnimation(fade_out);
+		QObject::connect(anim_group, &QSequentialAnimationGroup::finished, label, &QLabel::deleteLater);
+		anim_group->start(QAbstractAnimation::DeleteWhenStopped);
+	});
+}
+
+void toggle_input_listening_hotkey_callback(void *data, obs_hotkey_id id, obs_hotkey_t *hotkey, bool pressed)
+{
+	(void)data;
+	(void)id;
+	(void)hotkey;
+	if (!pressed) {
+		return;
+	}
+
+	const bool enabled = JoypadUiToggleInputListeningEnabled();
+	obs_log(LOG_INFO, "joypad-to-obs input listening %s via hotkey", enabled ? "enabled" : "disabled");
+	const QString status = enabled ? QString::fromUtf8(obs_module_text("JoypadToOBS.Common.On"))
+				       : QString::fromUtf8(obs_module_text("JoypadToOBS.Common.Off"));
+	const QString message = QString::fromUtf8(obs_module_text("JoypadToOBS.OSD.InputListeningStatus")).arg(status);
+	ShowOsdNotification(message);
+}
 
 std::string MakeAxisKey(const JoypadBinding &binding)
 {
@@ -137,12 +260,35 @@ void StoreAxisLastRawOnShutdown()
 
 static void save_hotkeys(obs_data_t *save_data, bool saving, void *private_data)
 {
-	(void)save_data;
-	(void)saving;
 	(void)private_data;
-	g_config.Save();
-	if (g_dialog) {
-		QMetaObject::invokeMethod(g_dialog, []() { g_dialog->RefreshProfiles(); }, Qt::QueuedConnection);
+
+	if (!save_data) {
+		return;
+	}
+
+	if (saving) {
+		if (g_toggle_input_listening_hotkey_id != OBS_INVALID_HOTKEY_ID) {
+			obs_data_array_t *hotkey_data = obs_hotkey_save(g_toggle_input_listening_hotkey_id);
+			if (hotkey_data) {
+				obs_data_set_array(save_data, kToggleInputListeningHotkeySaveKey, hotkey_data);
+				obs_data_array_release(hotkey_data);
+			}
+		}
+
+		g_config.Save();
+		if (g_dialog) {
+			QMetaObject::invokeMethod(
+				g_dialog, []() { g_dialog->RefreshProfiles(); }, Qt::QueuedConnection);
+		}
+		return;
+	}
+
+	obs_data_array_t *hotkey_data = obs_data_get_array(save_data, kToggleInputListeningHotkeySaveKey);
+	if (hotkey_data) {
+		if (g_toggle_input_listening_hotkey_id != OBS_INVALID_HOTKEY_ID) {
+			obs_hotkey_load(g_toggle_input_listening_hotkey_id, hotkey_data);
+		}
+		obs_data_array_release(hotkey_data);
 	}
 }
 } // namespace
@@ -154,106 +300,14 @@ bool obs_module_load(void)
 	g_config.Load();
 
 	g_config.SetProfileSwitchCallback([](const std::string &name) {
-		if (!g_config.GetOsdEnabled())
-			return;
-
-		QCoreApplication *app = QCoreApplication::instance();
-		if (!app) {
-			return;
-		}
-		QMetaObject::invokeMethod(app, [name]() {
-			QWidget *main_window = (QWidget *)obs_frontend_get_main_window();
-			if (!main_window)
-				return;
-
-			QLabel *label = new QLabel(main_window);
-			label->setWindowFlags(Qt::ToolTip | Qt::FramelessWindowHint);
-			label->setAttribute(Qt::WA_ShowWithoutActivating);
-			label->setAttribute(Qt::WA_StyledBackground, true);
-			label->setAutoFillBackground(true);
-			QString color = ToCssColor(QString::fromStdString(g_config.GetOsdColor()), "#ffffff");
-			QString background_color = ToCssColor(QString::fromStdString(g_config.GetOsdBackgroundColor()),
-							      "rgba(0, 0, 0, 230)");
-			int size = g_config.GetOsdFontSize();
-			label->setStyleSheet(BuildOsdStyle(color, background_color, size));
-			label->setText(QString("Joypad Profile: %1").arg(QString::fromStdString(name)));
-			label->adjustSize();
-
-			QRect r = main_window->geometry();
-			int m = 40; // Margin
-			int x = 0;
-			int y = 0;
-			int w = label->width();
-			int h = label->height();
-
-			switch (g_config.GetOsdPosition()) {
-			case JoypadOsdPosition::TopLeft:
-				x = r.x() + m;
-				y = r.y() + m;
-				break;
-			case JoypadOsdPosition::TopCenter:
-				x = r.x() + (r.width() - w) / 2;
-				y = r.y() + m;
-				break;
-			case JoypadOsdPosition::TopRight:
-				x = r.x() + r.width() - w - m;
-				y = r.y() + m;
-				break;
-			case JoypadOsdPosition::CenterLeft:
-				x = r.x() + m;
-				y = r.y() + (r.height() - h) / 2;
-				break;
-			case JoypadOsdPosition::Center:
-				x = r.x() + (r.width() - w) / 2;
-				y = r.y() + (r.height() - h) / 2;
-				break;
-			case JoypadOsdPosition::CenterRight:
-				x = r.x() + r.width() - w - m;
-				y = r.y() + (r.height() - h) / 2;
-				break;
-			case JoypadOsdPosition::BottomLeft:
-				x = r.x() + m;
-				y = r.y() + r.height() - h - m;
-				break;
-			case JoypadOsdPosition::BottomCenter:
-				x = r.x() + (r.width() - w) / 2;
-				y = r.y() + r.height() - h - m;
-				break;
-			case JoypadOsdPosition::BottomRight:
-				x = r.x() + r.width() - w - m;
-				y = r.y() + r.height() - h - m;
-				break;
-			}
-			label->move(x, y);
-			label->setWindowOpacity(0.0);
-			label->show();
-
-			auto *fade_in = new QPropertyAnimation(label, "windowOpacity");
-			fade_in->setDuration(180);
-			fade_in->setStartValue(0.0);
-			fade_in->setEndValue(1.0);
-			fade_in->setEasingCurve(QEasingCurve::InOutQuad);
-
-			auto *fade_out = new QPropertyAnimation(label, "windowOpacity");
-			fade_out->setDuration(600);
-			fade_out->setStartValue(1.0);
-			fade_out->setEndValue(0.0);
-			fade_out->setEasingCurve(QEasingCurve::OutCubic);
-
-			auto *anim_group = new QSequentialAnimationGroup(label);
-			anim_group->addAnimation(fade_in);
-			anim_group->addPause(1700);
-			anim_group->addAnimation(fade_out);
-			QObject::connect(anim_group, &QSequentialAnimationGroup::finished, label, &QLabel::deleteLater);
-			anim_group->start(QAbstractAnimation::DeleteWhenStopped);
-		});
+		ShowOsdNotification(QString("Joypad Profile: %1").arg(QString::fromStdString(name)));
 	});
 
 	g_input.SetOnButtonPressed([](const JoypadEvent &event) {
 		if (JoypadUiEmulateBindingDialogAction(event, &g_actions)) {
 			return;
 		}
-		if (JoypadUiIsBindingDialogOpen()) {
+		if (JoypadUiIsBindingDialogOpen() || !JoypadUiIsInputListeningEnabled()) {
 			return;
 		}
 		auto matches = g_config.FindMatchingBindings(event);
@@ -265,7 +319,7 @@ bool obs_module_load(void)
 		if (JoypadUiEmulateBindingDialogAction(event, &g_actions)) {
 			return;
 		}
-		if (JoypadUiIsBindingDialogOpen()) {
+		if (JoypadUiIsBindingDialogOpen() || !JoypadUiIsInputListeningEnabled()) {
 			return;
 		}
 		if (!event.is_axis) {
@@ -294,6 +348,9 @@ bool obs_module_load(void)
 #endif
 	g_input.Start();
 
+	g_toggle_input_listening_hotkey_id = obs_hotkey_register_frontend(
+		"joypad_to_obs.toggle_input_listening", obs_module_text("JoypadToOBS.Hotkey.ToggleInputListening"),
+		toggle_input_listening_hotkey_callback, nullptr);
 	obs_frontend_add_save_callback(save_hotkeys, nullptr);
 
 	g_tools_action = reinterpret_cast<QAction *>(
@@ -314,6 +371,10 @@ bool obs_module_load(void)
 void obs_module_unload(void)
 {
 	obs_frontend_remove_save_callback(save_hotkeys, nullptr);
+	if (g_toggle_input_listening_hotkey_id != OBS_INVALID_HOTKEY_ID) {
+		obs_hotkey_unregister(g_toggle_input_listening_hotkey_id);
+		g_toggle_input_listening_hotkey_id = OBS_INVALID_HOTKEY_ID;
+	}
 	StoreAxisLastRawOnShutdown();
 	g_config.Unload();
 	g_input.Stop();

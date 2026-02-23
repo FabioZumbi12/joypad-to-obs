@@ -59,4 +59,6 @@ private:
 };
 
 bool JoypadUiIsBindingDialogOpen();
+bool JoypadUiIsInputListeningEnabled();
+bool JoypadUiToggleInputListeningEnabled();
 bool JoypadUiEmulateBindingDialogAction(const JoypadEvent &event, JoypadActionEngine *actions);

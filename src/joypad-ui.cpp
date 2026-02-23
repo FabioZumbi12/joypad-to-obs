@@ -66,6 +66,7 @@ constexpr int kDeviceStableIdRole = Qt::UserRole + 1;
 constexpr int kDeviceTypeIdRole = Qt::UserRole + 2;
 
 std::atomic<int> g_binding_dialog_open_count{0};
+std::atomic<bool> g_input_listening_enabled{true};
 struct DialogTestState {
 	bool enabled = false;
 	JoypadBinding binding;
@@ -1291,6 +1292,20 @@ private:
 bool JoypadUiIsBindingDialogOpen()
 {
 	return g_binding_dialog_open_count.load(std::memory_order_relaxed) > 0;
+}
+
+bool JoypadUiIsInputListeningEnabled()
+{
+	return g_input_listening_enabled.load(std::memory_order_relaxed);
+}
+
+bool JoypadUiToggleInputListeningEnabled()
+{
+	bool expected = g_input_listening_enabled.load(std::memory_order_relaxed);
+	while (!g_input_listening_enabled.compare_exchange_weak(expected, !expected, std::memory_order_relaxed,
+								std::memory_order_relaxed)) {
+	}
+	return !expected;
 }
 
 bool JoypadUiEmulateBindingDialogAction(const JoypadEvent &event, JoypadActionEngine *actions)
