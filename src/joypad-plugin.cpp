@@ -27,6 +27,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 
 #include <QAction>
 #include <QWidget>
+#include <atomic>
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -48,6 +49,7 @@ namespace {
 JoypadConfigStore g_config;
 JoypadInputManager g_input;
 JoypadActionEngine g_actions;
+std::atomic<bool> g_unloading{false};
 
 QAction *g_tools_action = nullptr;
 JoypadToolsDialog *g_dialog = nullptr;
@@ -60,16 +62,22 @@ QString ToCssColor(const QString &input, const QString &fallback);
 
 void ShowOsdNotification(const QString &text)
 {
+	if (g_unloading.load(std::memory_order_acquire)) {
+		return;
+	}
 	if (!g_config.GetOsdEnabled()) {
 		return;
 	}
 
 	QCoreApplication *app = QCoreApplication::instance();
-	if (!app) {
+	if (!app || QCoreApplication::closingDown()) {
 		return;
 	}
 
 	QMetaObject::invokeMethod(app, [text]() {
+		if (g_unloading.load(std::memory_order_acquire) || QCoreApplication::closingDown()) {
+			return;
+		}
 		QWidget *main_window = (QWidget *)obs_frontend_get_main_window();
 		if (!main_window) {
 			return;
@@ -164,6 +172,9 @@ void toggle_input_listening_hotkey_callback(void *data, obs_hotkey_id id, obs_ho
 	(void)id;
 	(void)hotkey;
 	if (!pressed) {
+		return;
+	}
+	if (g_unloading.load(std::memory_order_acquire)) {
 		return;
 	}
 
@@ -276,7 +287,7 @@ static void save_hotkeys(obs_data_t *save_data, bool saving, void *private_data)
 		}
 
 		g_config.Save();
-		if (g_dialog) {
+		if (!g_unloading.load(std::memory_order_acquire) && g_dialog) {
 			QMetaObject::invokeMethod(
 				g_dialog, []() { g_dialog->RefreshProfiles(); }, Qt::QueuedConnection);
 		}
@@ -296,14 +307,21 @@ static void save_hotkeys(obs_data_t *save_data, bool saving, void *private_data)
 bool obs_module_load(void)
 {
 	obs_log(LOG_INFO, "joypad-to-obs loaded (version %s)", PLUGIN_VERSION);
+	g_unloading.store(false, std::memory_order_release);
 
 	g_config.Load();
 
 	g_config.SetProfileSwitchCallback([](const std::string &name) {
+		if (g_unloading.load(std::memory_order_acquire)) {
+			return;
+		}
 		ShowOsdNotification(QString("Joypad Profile: %1").arg(QString::fromStdString(name)));
 	});
 
 	g_input.SetOnButtonPressed([](const JoypadEvent &event) {
+		if (g_unloading.load(std::memory_order_acquire)) {
+			return;
+		}
 		if (JoypadUiEmulateBindingDialogAction(event, &g_actions)) {
 			return;
 		}
@@ -316,6 +334,9 @@ bool obs_module_load(void)
 		}
 	});
 	g_input.SetOnAxisChanged([](const JoypadEvent &event) {
+		if (g_unloading.load(std::memory_order_acquire)) {
+			return;
+		}
 		if (JoypadUiEmulateBindingDialogAction(event, &g_actions)) {
 			return;
 		}
@@ -356,6 +377,9 @@ bool obs_module_load(void)
 	g_tools_action = reinterpret_cast<QAction *>(
 		obs_frontend_add_tools_menu_qaction(obs_module_text("JoypadToOBS.MenuTitle")));
 	QObject::connect(g_tools_action, &QAction::triggered, []() {
+		if (g_unloading.load(std::memory_order_acquire)) {
+			return;
+		}
 		if (!g_dialog) {
 			auto *parent = reinterpret_cast<QWidget *>(obs_frontend_get_main_window());
 			g_dialog = new JoypadToolsDialog(parent, &g_config, &g_input);
@@ -370,25 +394,31 @@ bool obs_module_load(void)
 
 void obs_module_unload(void)
 {
+	g_unloading.store(true, std::memory_order_release);
 	obs_frontend_remove_save_callback(save_hotkeys, nullptr);
 	if (g_toggle_input_listening_hotkey_id != OBS_INVALID_HOTKEY_ID) {
 		obs_hotkey_unregister(g_toggle_input_listening_hotkey_id);
 		g_toggle_input_listening_hotkey_id = OBS_INVALID_HOTKEY_ID;
 	}
 	StoreAxisLastRawOnShutdown();
-	g_config.Unload();
+
+	g_config.SetProfileSwitchCallback({});
+	g_input.SetOnButtonPressed({});
+	g_input.SetOnAxisChanged({});
+	g_input.CancelLearn();
 	g_input.Stop();
 
 	if (g_dialog) {
+		QObject::disconnect(g_dialog, nullptr, nullptr, nullptr);
 		g_dialog->close();
-		delete g_dialog;
 		g_dialog = nullptr;
 	}
 
 	if (g_tools_action) {
-		g_tools_action->deleteLater();
+		QObject::disconnect(g_tools_action, nullptr, nullptr, nullptr);
 		g_tools_action = nullptr;
 	}
 
+	g_config.Unload();
 	obs_log(LOG_INFO, "joypad-to-obs unloaded");
 }

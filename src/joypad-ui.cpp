@@ -336,7 +336,7 @@ std::vector<std::string> get_filter_names_for_source(const std::string &source_n
 QString input_label_from_event(const JoypadEvent &event)
 {
 	if (event.is_axis) {
-		QString dir = event.axis_value >= 0.0 ? "+" : "-";
+		const QString dir = event.axis_value >= 0.0 ? QStringLiteral("+") : QStringLiteral("-");
 		return L("JoypadToOBS.Common.AxisNumber").arg(event.axis_index + 1).arg(dir);
 	}
 	return L("JoypadToOBS.Common.ButtonNumber").arg(event.button);
@@ -345,11 +345,11 @@ QString input_label_from_event(const JoypadEvent &event)
 QString input_label_from_binding(const JoypadBinding &binding)
 {
 	if (binding.input_type == JoypadInputType::Axis) {
-		QString dir = "+";
+		QString dir = QStringLiteral("+");
 		if (binding.axis_direction == JoypadAxisDirection::Negative) {
-			dir = "-";
+			dir = QStringLiteral("-");
 		} else if (binding.axis_direction == JoypadAxisDirection::Both) {
-			dir = "+/-";
+			dir = QStringLiteral("+/-");
 		}
 		return L("JoypadToOBS.Common.AxisNumber").arg(binding.axis_index + 1).arg(dir);
 	}
@@ -1058,7 +1058,8 @@ private:
 								target = QString::fromStdString(b.scene_name);
 							else if (!b.source_name.empty())
 								target = QString::fromStdString(b.source_name);
-							conflicts += QString("• %1 (%2)\n").arg(actionName, target);
+							conflicts += QStringLiteral("\u2022 %1 (%2)\n")
+									     .arg(actionName, target);
 						}
 					}
 
@@ -1754,8 +1755,8 @@ JoypadToolsDialog::JoypadToolsDialog(QWidget *parent, JoypadConfigStore *config,
 			[update_preview](int) { update_preview(); });
 		connect(reset_button, &QPushButton::clicked, &osd_dlg, [=, &currentColor, &currentBgColor]() {
 			chk->setChecked(true);
-			currentColor = "#ffffff";
-			currentBgColor = "#000000";
+			currentColor = QStringLiteral("#ffffff");
+			currentBgColor = QStringLiteral("#000000");
 			spin->setValue(24);
 			const int bottom_center_idx = pos_combo->findData((int)JoypadOsdPosition::BottomCenter);
 			pos_combo->setCurrentIndex(bottom_center_idx >= 0 ? bottom_center_idx : 0);
@@ -1944,12 +1945,14 @@ void JoypadToolsDialog::RefreshBindings()
 
 		auto *edit_button = new QToolButton(table_);
 		edit_button->setText(L("JoypadToOBS.Button.Edit"));
-		edit_button->setProperty("binding_index", row);
+		const QVariant binding_index_value(row);
+		edit_button->setProperty("binding_index", binding_index_value);
 		table_->setCellWidget(row, 7, edit_button);
 
 		auto *delete_button = new QToolButton(table_);
 		delete_button->setText(L("JoypadToOBS.Button.Delete"));
-		delete_button->setProperty("binding_index", row);
+		const QVariant binding_index_value_delete(row);
+		delete_button->setProperty("binding_index", binding_index_value_delete);
 		table_->setCellWidget(row, 8, delete_button);
 
 		connect(edit_button, &QToolButton::clicked, this, [this, uid]() {
