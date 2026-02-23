@@ -54,22 +54,34 @@ function(_setup_obs_studio)
 
   if(OS_WINDOWS)
     set(_cmake_generator "${CMAKE_GENERATOR}")
-    set(_cmake_arch "-A ${arch}")
+    set(_cmake_arch -A ${arch})
     set(
       _cmake_extra
-      "-DCMAKE_SYSTEM_VERSION=${CMAKE_SYSTEM_VERSION} -DCMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION=${CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION} -DCMAKE_ENABLE_SCRIPTING=OFF"
+      -DCMAKE_SYSTEM_VERSION=${CMAKE_SYSTEM_VERSION}
+      -DCMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION=${CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION}
+      -DENABLE_SCRIPTING=OFF
+      -DENABLE_SCRIPTING_LUA=OFF
+      -DENABLE_SCRIPTING_PYTHON=OFF
+      -DCMAKE_ENABLE_SCRIPTING=OFF
     )
   elseif(OS_MACOS)
     set(_cmake_generator "Xcode")
-    set(_cmake_arch "-DCMAKE_OSX_ARCHITECTURES:STRING='arm64;x86_64'")
-    set(_cmake_extra "-DCMAKE_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}")
+    set(_cmake_arch "-DCMAKE_OSX_ARCHITECTURES:STRING=arm64\\;x86_64")
+    set(
+      _cmake_extra
+      -DCMAKE_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}
+      -DENABLE_SCRIPTING=OFF
+      -DENABLE_SCRIPTING_LUA=OFF
+      -DENABLE_SCRIPTING_PYTHON=OFF
+      -DCMAKE_ENABLE_SCRIPTING=OFF
+    )
   endif()
 
   message(STATUS "Configure ${label} (${arch})")
   execute_process(
     COMMAND
       "${CMAKE_COMMAND}" -S "${dependencies_dir}/${_obs_destination}" -B
-      "${dependencies_dir}/${_obs_destination}/build_${arch}" -G ${_cmake_generator} "${_cmake_arch}"
+      "${dependencies_dir}/${_obs_destination}/build_${arch}" -G ${_cmake_generator} ${_cmake_arch}
       -DOBS_CMAKE_VERSION:STRING=3.0.0 -DENABLE_PLUGINS:BOOL=OFF -DENABLE_FRONTEND:BOOL=OFF
       -DCMAKE_POLICY_VERSION_MINIMUM:STRING=3.5 -DOBS_VERSION_OVERRIDE:STRING=${_obs_version}
       "-DCMAKE_PREFIX_PATH='${CMAKE_PREFIX_PATH}'" ${_is_fresh} ${_cmake_extra}

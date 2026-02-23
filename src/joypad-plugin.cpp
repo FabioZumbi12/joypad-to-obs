@@ -408,16 +408,9 @@ void obs_module_unload(void)
 	g_input.CancelLearn();
 	g_input.Stop();
 
-	if (g_dialog) {
-		QObject::disconnect(g_dialog, nullptr, nullptr, nullptr);
-		g_dialog->close();
-		g_dialog = nullptr;
-	}
-
-	if (g_tools_action) {
-		QObject::disconnect(g_tools_action, nullptr, nullptr, nullptr);
-		g_tools_action = nullptr;
-	}
+	// Avoid touching Qt objects during teardown; OBS/Qt owns their destruction order.
+	g_dialog = nullptr;
+	g_tools_action = nullptr;
 
 	g_config.Unload();
 	obs_log(LOG_INFO, "joypad-to-obs unloaded");

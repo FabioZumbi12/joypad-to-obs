@@ -33,6 +33,23 @@ include(helpers)
 
 add_library(${CMAKE_PROJECT_NAME} MODULE)
 
+# CI fallback: resolve OBS package configs from local dependency install path.
+if(NOT libobs_DIR AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.deps/cmake/libobs/libobsConfig.cmake")
+  set(libobs_DIR "${CMAKE_CURRENT_SOURCE_DIR}/.deps/cmake/libobs" CACHE PATH "Path to libobs CMake package" FORCE)
+endif()
+if(
+  NOT obs-frontend-api_DIR
+  AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.deps/cmake/obs-frontend-api/obs-frontend-apiConfig.cmake"
+)
+  set(
+    obs-frontend-api_DIR
+    "${CMAKE_CURRENT_SOURCE_DIR}/.deps/cmake/obs-frontend-api"
+    CACHE PATH
+    "Path to obs-frontend-api CMake package"
+    FORCE
+  )
+endif()
+
 find_package(libobs REQUIRED)
 target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE OBS::libobs)
 
