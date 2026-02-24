@@ -122,6 +122,27 @@ cmake ..
 cmake --build . --config Release
 ```
 
+### Simulate GitHub Actions Build (Windows)
+
+To run a local build flow close to the `windows-2022` GitHub Actions job, use:
+
+```powershell
+pwsh -File .\scripts\ci-local-windows.ps1
+```
+
+Useful options:
+
+```powershell
+# Simulate fresh runner state (slowest, most faithful)
+pwsh -File .\scripts\ci-local-windows.ps1 -CleanBuild -CleanDeps -CleanRelease
+
+# Build only (skip packaging)
+pwsh -File .\scripts\ci-local-windows.ps1 -Package:$false
+
+# Enable verbose CI-like debug logs
+pwsh -File .\scripts\ci-local-windows.ps1 -DebugLogs
+```
+
 ## License
 This plugin is released under the GPLv2 license.
 
