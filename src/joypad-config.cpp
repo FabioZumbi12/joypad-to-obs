@@ -29,6 +29,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <map>
 #include <util/dstr.h>
 #include <cstring>
+#include <chrono>
 
 namespace {
 const char *kConfigFileName = "joypad-to-obs.json";
@@ -848,6 +849,7 @@ std::vector<JoypadBinding> JoypadConfigStore::GetBindingsSnapshot() const
 std::vector<JoypadBinding> JoypadConfigStore::FindMatchingBindings(const JoypadEvent &event) const
 {
 	std::vector<JoypadBinding> matches;
+	const auto now = std::chrono::steady_clock::now();
 	std::lock_guard<std::mutex> lock(mutex_);
 	if (current_profile_index_ < 0 || current_profile_index_ >= (int)profiles_.size()) {
 		return matches;
@@ -924,6 +926,26 @@ std::vector<JoypadBinding> JoypadConfigStore::FindMatchingBindings(const JoypadE
 				double sign = value >= 0.0 ? 1.0 : -1.0;
 				double intensity = std::clamp(abs_value, 0.0, 1.0);
 				binding.volume_value = std::fabs(binding.volume_value) * intensity * sign;
+			}
+			if (binding.axis_interval_ms > 0) {
+				std::string interval_key;
+				if (binding.uid > 0) {
+					interval_key = std::to_string((long long)binding.uid);
+				} else {
+					interval_key = event.device_id + ":" + std::to_string(binding.axis_index) +
+						       ":" + std::to_string((int)binding.action) + ":" +
+						       binding.source_name + ":" + binding.filter_name;
+				}
+				auto it_last = axis_last_dispatch_.find(interval_key);
+				if (it_last != axis_last_dispatch_.end()) {
+					const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+								     now - it_last->second)
+								     .count();
+					if (elapsed < binding.axis_interval_ms) {
+						continue;
+					}
+				}
+				axis_last_dispatch_[interval_key] = now;
 			}
 		} else {
 			if (event.is_axis || binding.button != event.button) {

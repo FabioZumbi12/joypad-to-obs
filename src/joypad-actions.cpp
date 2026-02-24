@@ -20,6 +20,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 
 #include <obs-frontend-api.h>
 #include <obs-module.h>
+#include <algorithm>
 #include <cmath>
 #include <QMetaObject>
 #include <QCoreApplication>
@@ -27,6 +28,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 namespace {
 constexpr float kMinDb = -60.0f;
 constexpr float kMaxDb = 50.0f;
+constexpr float kVolumeEpsilon = 0.0005f;
 
 static float db_to_mul(float db)
 {
@@ -160,7 +162,11 @@ void JoypadActionEngine::Execute(const JoypadBinding &binding)
 		if (target_db > kMaxDb) {
 			target_db = kMaxDb;
 		}
-		obs_source_set_volume(source, db_to_mul(target_db));
+		const float target_mul = db_to_mul(target_db);
+		const float current_mul = obs_source_get_volume(source);
+		if (std::fabs(current_mul - target_mul) > kVolumeEpsilon) {
+			obs_source_set_volume(source, target_mul);
+		}
 		obs_source_release(source);
 		break;
 	}
@@ -186,7 +192,11 @@ void JoypadActionEngine::Execute(const JoypadBinding &binding)
 		if (target_db > 0.0f) {
 			target_db = 0.0f;
 		}
-		obs_source_set_volume(source, db_to_mul(target_db));
+		const float target_mul = db_to_mul(target_db);
+		const float current_mul = obs_source_get_volume(source);
+		if (std::fabs(current_mul - target_mul) > kVolumeEpsilon) {
+			obs_source_set_volume(source, target_mul);
+		}
 		obs_source_release(source);
 		break;
 	}
@@ -214,7 +224,9 @@ void JoypadActionEngine::Execute(const JoypadBinding &binding)
 		if (next_mul > max_mul) {
 			next_mul = max_mul;
 		}
-		obs_source_set_volume(source, next_mul);
+		if (std::fabs(current_mul - next_mul) > kVolumeEpsilon) {
+			obs_source_set_volume(source, next_mul);
+		}
 		obs_source_release(source);
 		break;
 	}

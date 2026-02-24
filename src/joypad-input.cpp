@@ -948,6 +948,8 @@ void JoypadInputManager::PollLoop()
 	[[maybe_unused]] const double default_threshold = 0.1;
 	[[maybe_unused]] const int default_interval_ms = 0;
 	while (running_.load()) {
+		std::vector<JoypadEvent> pending_button_events;
+		std::vector<JoypadEvent> pending_axis_events;
 #ifdef _WIN32
 		{
 			std::lock_guard<std::mutex> lock(devices_mutex_);
@@ -1037,7 +1039,7 @@ void JoypadInputManager::PollLoop()
 							event.device_type_id = state.type_id;
 							event.device_name = state.name;
 							event.button = bit + 1;
-							DispatchEvent(event);
+							pending_button_events.push_back(std::move(event));
 						}
 					}
 				}
@@ -1074,7 +1076,7 @@ void JoypadInputManager::PollLoop()
 					event.axis_index = i;
 					event.axis_value = normalized;
 					event.axis_raw_value = raw;
-					DispatchAxisAbsolute(event);
+					pending_axis_events.push_back(std::move(event));
 					state.last_axes[i] = raw;
 				}
 
@@ -1105,7 +1107,7 @@ void JoypadInputManager::PollLoop()
 						event.device_type_id = state.type_id;
 						event.device_name = state.name;
 						event.button = (int)e.number + 1;
-						DispatchEvent(event);
+						pending_button_events.push_back(std::move(event));
 					}
 					if ((e.type & JS_EVENT_AXIS) != 0) {
 						const int axis_index = (int)e.number;
@@ -1150,7 +1152,7 @@ void JoypadInputManager::PollLoop()
 						event.axis_index = axis_index;
 						event.axis_value = value;
 						event.axis_raw_value = raw;
-						DispatchAxisAbsolute(event);
+						pending_axis_events.push_back(std::move(event));
 						state.last_axes[axis_index] = raw;
 					}
 				}
@@ -1462,6 +1464,13 @@ void JoypadInputManager::PollLoop()
 
 		CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.05, true);
 #endif
+
+		for (const auto &event : pending_button_events) {
+			DispatchEvent(event);
+		}
+		for (const auto &event : pending_axis_events) {
+			DispatchAxisAbsolute(event);
+		}
 
 		[[maybe_unused]] auto now = std::chrono::steady_clock::now();
 #if defined(_WIN32)

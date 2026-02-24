@@ -20,6 +20,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 
 #include <mutex>
 #include <atomic>
+#include <chrono>
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -178,6 +179,7 @@ private:
 	mutable std::mutex mutex_;
 	std::atomic<bool> dirty_{false};
 	mutable std::unordered_map<std::string, bool> axis_active_;
+	mutable std::unordered_map<std::string, std::chrono::steady_clock::time_point> axis_last_dispatch_;
 	std::unordered_map<std::string, double> axis_last_raw_;
 	std::string last_file_path_;
 	ProfileSwitchCallback on_profile_switch_;
