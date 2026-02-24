@@ -927,7 +927,10 @@ std::vector<JoypadBinding> JoypadConfigStore::FindMatchingBindings(const JoypadE
 				double intensity = std::clamp(abs_value, 0.0, 1.0);
 				binding.volume_value = std::fabs(binding.volume_value) * intensity * sign;
 			}
-			if (binding.axis_interval_ms > 0) {
+			const bool is_continuous_axis_action =
+				(binding.action == JoypadActionType::SetSourceVolumePercent) ||
+				(binding.action == JoypadActionType::AdjustSourceVolume);
+			if (!is_continuous_axis_action && binding.axis_interval_ms > 0) {
 				std::string interval_key;
 				if (binding.uid > 0) {
 					interval_key = std::to_string((long long)binding.uid);
