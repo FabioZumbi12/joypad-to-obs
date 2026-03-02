@@ -48,6 +48,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 
 namespace {
 constexpr int kMaxTrackedAxes = 8;
+constexpr double kAxisContinuousHoldThreshold = 0.01;
 
 #ifdef _WIN32
 struct DiControllerInfo {
@@ -927,6 +928,7 @@ bool JoypadInputManager::BeginLearn(std::function<void(const JoypadEvent &)> han
 		return false;
 	}
 	learn_handler_ = std::move(handler);
+	learn_active_.store(true, std::memory_order_release);
 	return true;
 }
 
@@ -934,6 +936,7 @@ void JoypadInputManager::CancelLearn()
 {
 	std::lock_guard<std::mutex> lock(handler_mutex_);
 	learn_handler_ = nullptr;
+	learn_active_.store(false, std::memory_order_release);
 }
 
 void JoypadInputManager::MarkDeviceDisconnected(DeviceState &state)
@@ -1057,7 +1060,9 @@ void JoypadInputManager::PollLoop()
 						continue;
 					}
 					double prev_raw = state.last_axes[i];
-					if (std::fabs(raw - prev_raw) < 0.000001) {
+					const bool hold_active = std::fabs(normalized) >= kAxisContinuousHoldThreshold;
+					const bool learning_active = learn_active_.load(std::memory_order_acquire);
+					if (std::fabs(raw - prev_raw) < 0.000001 && (!hold_active || learning_active)) {
 						continue;
 					}
 					if (it != axis_last_trigger_.end() &&
@@ -1132,7 +1137,11 @@ void JoypadInputManager::PollLoop()
 							continue;
 						}
 						double prev = state.last_axes[axis_index];
-						if (raw == prev) {
+						const bool hold_active = std::fabs(value) >=
+									 kAxisContinuousHoldThreshold;
+						const bool learning_active =
+							learn_active_.load(std::memory_order_acquire);
+						if (raw == prev && (!hold_active || learning_active)) {
 							continue;
 						}
 						if (it != axis_last_trigger_.end() &&
@@ -1436,7 +1445,11 @@ void JoypadInputManager::PollLoop()
 						if (init_only) {
 							return;
 						}
-						if (raw == prev) {
+						const bool hold_active = std::fabs(norm) >=
+									 kAxisContinuousHoldThreshold;
+						const bool learning_active =
+							self->learn_active_.load(std::memory_order_acquire);
+						if (raw == prev && (!hold_active || learning_active)) {
 							return;
 						}
 						if (it != self->axis_last_trigger_.end() &&
@@ -1510,6 +1523,7 @@ void JoypadInputManager::DispatchEvent(const JoypadEvent &event)
 		}
 		if (learn_handler_) {
 			learn_handler_ = nullptr;
+			learn_active_.store(false, std::memory_order_release);
 		}
 	}
 
@@ -1543,6 +1557,7 @@ void JoypadInputManager::DispatchAxisAbsolute(const JoypadEvent &event)
 		}
 		if (learn_handler_) {
 			learn_handler_ = nullptr;
+			learn_active_.store(false, std::memory_order_release);
 		}
 	}
 	if (learn_handler) {

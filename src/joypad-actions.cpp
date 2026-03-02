@@ -208,22 +208,22 @@ void JoypadActionEngine::Execute(const JoypadBinding &binding)
 		if (!source) {
 			return;
 		}
-		float current_mul = obs_source_get_volume(source);
-		float next_mul = current_mul + (float)binding.volume_value;
-		if (next_mul < 0.0f) {
-			next_mul = 0.0f;
+		const float current_mul = obs_source_get_volume(source);
+		float current_db = mul_to_db(current_mul);
+		if (current_db < kMinDb) {
+			current_db = kMinDb;
 		}
-		if (!binding.allow_above_unity && next_mul > 1.0f) {
-			next_mul = 1.0f;
+		float next_db = current_db + (float)binding.volume_value;
+		if (!binding.allow_above_unity && next_db > 0.0f) {
+			next_db = 0.0f;
 		}
-		float min_mul = db_to_mul(kMinDb);
-		float max_mul = db_to_mul(kMaxDb);
-		if (next_mul < min_mul) {
-			next_mul = min_mul;
+		if (next_db < kMinDb) {
+			next_db = kMinDb;
 		}
-		if (next_mul > max_mul) {
-			next_mul = max_mul;
+		if (next_db > kMaxDb) {
+			next_db = kMaxDb;
 		}
+		const float next_mul = db_to_mul(next_db);
 		if (std::fabs(current_mul - next_mul) > kVolumeEpsilon) {
 			obs_source_set_volume(source, next_mul);
 		}

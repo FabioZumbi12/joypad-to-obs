@@ -132,7 +132,25 @@ static void load_binding_from_data(JoypadBinding &binding, obs_data_t *data)
 	binding.axis_threshold = obs_data_get_double(data, "axis_threshold");
 	bool axis_threshold_set = obs_data_get_bool(data, "axis_threshold_set");
 	if (!axis_threshold_set) {
-		binding.axis_threshold = 0.5;
+		binding.axis_threshold = 0.10;
+	}
+	binding.axis_min_per_second = obs_data_get_double(data, "axis_min_per_second");
+	if (!obs_data_has_user_value(data, "axis_min_per_second")) {
+		// Backward compatibility with older configs.
+		double legacy_min = obs_data_get_double(data, "axis_activation_min");
+		binding.axis_min_per_second = legacy_min > 0.0 ? legacy_min * 10.0 : 2.5;
+	}
+	binding.axis_max_per_second = obs_data_get_double(data, "axis_max_per_second");
+	if (!obs_data_has_user_value(data, "axis_max_per_second")) {
+		// Backward compatibility with older configs.
+		double legacy_max = obs_data_get_double(data, "axis_activation_max");
+		binding.axis_max_per_second = legacy_max > 0.0 ? legacy_max * 10.0 : 20.0;
+	}
+	binding.axis_threshold = std::clamp(binding.axis_threshold, 0.0, 0.95);
+	binding.axis_min_per_second = std::clamp(binding.axis_min_per_second, 1.0, 60.0);
+	binding.axis_max_per_second = std::clamp(binding.axis_max_per_second, 1.0, 60.0);
+	if (binding.axis_max_per_second < binding.axis_min_per_second) {
+		binding.axis_max_per_second = binding.axis_min_per_second;
 	}
 	binding.axis_interval_ms = (int)obs_data_get_int(data, "axis_interval_ms");
 	if (binding.axis_interval_ms <= 0) {
@@ -187,6 +205,8 @@ static void save_binding_to_data(const JoypadBinding &binding, obs_data_t *data)
 		obs_data_set_bool(data, "axis_inverted", binding.axis_inverted);
 		obs_data_set_double(data, "axis_threshold", binding.axis_threshold);
 		obs_data_set_bool(data, "axis_threshold_set", true);
+		obs_data_set_double(data, "axis_min_per_second", binding.axis_min_per_second);
+		obs_data_set_double(data, "axis_max_per_second", binding.axis_max_per_second);
 		obs_data_set_int(data, "axis_interval_ms", binding.axis_interval_ms);
 		obs_data_set_double(data, "axis_min_value", binding.axis_min_value);
 		obs_data_set_double(data, "axis_max_value", binding.axis_max_value);
@@ -903,8 +923,8 @@ std::vector<JoypadBinding> JoypadConfigStore::FindMatchingBindings(const JoypadE
 				}
 			}
 
-			const double threshold_on = binding.axis_threshold;
-			const double threshold_off = binding.axis_threshold * 0.4;
+			const double threshold_on = std::clamp(binding.axis_threshold, 0.0, 0.95);
+			const double threshold_off = threshold_on * 0.4;
 			std::string axis_key = event.device_id + ":" + std::to_string(binding.axis_index) + ":" +
 					       std::to_string((int)binding.axis_direction) + ":" +
 					       (binding.axis_inverted ? "1" : "0");
@@ -924,13 +944,18 @@ std::vector<JoypadBinding> JoypadConfigStore::FindMatchingBindings(const JoypadE
 			}
 			if (binding.action == JoypadActionType::AdjustSourceVolume) {
 				double sign = value >= 0.0 ? 1.0 : -1.0;
-				double intensity = std::clamp(abs_value, 0.0, 1.0);
-				binding.volume_value = std::fabs(binding.volume_value) * intensity * sign;
+				binding.volume_value = std::fabs(binding.volume_value) * sign;
 			}
 			const bool is_continuous_axis_action =
-				(binding.action == JoypadActionType::SetSourceVolumePercent) ||
-				(binding.action == JoypadActionType::AdjustSourceVolume);
-			if (!is_continuous_axis_action && binding.axis_interval_ms > 0) {
+				(binding.action == JoypadActionType::SetSourceVolumePercent);
+			if (!is_continuous_axis_action) {
+				const double min_rate = std::clamp(binding.axis_min_per_second, 1.0, 60.0);
+				const double max_rate = std::clamp(binding.axis_max_per_second, min_rate, 60.0);
+				double intensity =
+					std::clamp((abs_value - threshold_on) / (1.0 - threshold_on), 0.0, 1.0);
+				double rate = min_rate + (max_rate - min_rate) * intensity;
+				int dynamic_interval_ms = (int)std::round(1000.0 / std::max(rate, 0.001));
+				dynamic_interval_ms = std::max(dynamic_interval_ms, 1);
 				std::string interval_key;
 				if (binding.uid > 0) {
 					interval_key = std::to_string((long long)binding.uid);
@@ -944,7 +969,7 @@ std::vector<JoypadBinding> JoypadConfigStore::FindMatchingBindings(const JoypadE
 					const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
 								     now - it_last->second)
 								     .count();
-					if (elapsed < binding.axis_interval_ms) {
+					if (elapsed < dynamic_interval_ms) {
 						continue;
 					}
 				}

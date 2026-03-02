@@ -56,8 +56,10 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <mutex>
+#include <unordered_map>
 #include <vector>
 
 namespace {
@@ -73,6 +75,7 @@ struct DialogTestState {
 };
 std::mutex g_dialog_test_mutex;
 DialogTestState g_dialog_test_state;
+std::unordered_map<std::string, std::chrono::steady_clock::time_point> g_dialog_axis_last_dispatch;
 
 inline QString L(const char *key)
 {
@@ -190,10 +193,10 @@ QString binding_details(const JoypadBinding &binding)
 	case JoypadActionType::SetSourceVolume:
 		return L("JoypadToOBS.Common.DbValue").arg(binding.volume_value, 0, 'f', 1);
 	case JoypadActionType::AdjustSourceVolume:
-		return (binding.volume_value >= 0.0
-				? L("JoypadToOBS.Common.PositiveValue").arg(binding.volume_value, 0, 'f', 2)
-				: L("JoypadToOBS.Common.NegativeValue").arg(binding.volume_value, 0, 'f', 2)) +
-		       L("JoypadToOBS.Common.MultiplierSuffix");
+		if (binding.volume_value >= 0.0) {
+			return L("JoypadToOBS.Common.PositiveValue").arg(binding.volume_value, 0, 'f', 1) + " dB";
+		}
+		return L("JoypadToOBS.Common.DbValue").arg(binding.volume_value, 0, 'f', 1);
 	case JoypadActionType::SetSourceVolumePercent:
 		return QString::number(binding.slider_gamma, 'f', 2) + " " + L("JoypadToOBS.Common.MultiplierSuffix");
 	case JoypadActionType::SetFilterEnabled:
@@ -418,10 +421,27 @@ public:
 		axis_live_value_label_ = new QLabel("0.00", device_group);
 
 		axis_threshold_label_ = new QLabel(L("JoypadToOBS.Field.AxisThreshold"), device_group);
-		axis_threshold_combo_ = new QComboBox(device_group);
-		axis_threshold_combo_->addItem(L("JoypadToOBS.AxisThreshold.Any"), 0.0);
-		axis_threshold_combo_->addItem(L("JoypadToOBS.AxisThreshold.Strong"), 0.5);
+		axis_threshold_spin_ = new QDoubleSpinBox(device_group);
+		axis_threshold_spin_->setRange(0.0, 0.95);
+		axis_threshold_spin_->setSingleStep(0.01);
+		axis_threshold_spin_->setDecimals(2);
+		axis_threshold_spin_->setValue(0.10);
+		axis_min_per_second_label_ = new QLabel(L("JoypadToOBS.Field.AxisMinPerSecond"), device_group);
+		axis_min_per_second_spin_ = new QDoubleSpinBox(device_group);
+		axis_min_per_second_spin_->setRange(1.0, 60.0);
+		axis_min_per_second_spin_->setSingleStep(0.5);
+		axis_min_per_second_spin_->setDecimals(1);
+		axis_min_per_second_spin_->setValue(2.5);
+		axis_min_per_second_spin_->setSuffix(" /s");
+		axis_max_per_second_label_ = new QLabel(L("JoypadToOBS.Field.AxisMaxPerSecond"), device_group);
+		axis_max_per_second_spin_ = new QDoubleSpinBox(device_group);
+		axis_max_per_second_spin_->setRange(1.0, 60.0);
+		axis_max_per_second_spin_->setSingleStep(0.5);
+		axis_max_per_second_spin_->setDecimals(1);
+		axis_max_per_second_spin_->setValue(20.0);
+		axis_max_per_second_spin_->setSuffix(" /s");
 		axis_both_checkbox_ = new QCheckBox(L("JoypadToOBS.Field.AxisBothDirections"), device_group);
+		axis_both_checkbox_->setChecked(true);
 		axis_min_label_ = new QLabel(L("JoypadToOBS.Field.AxisMinValue"), device_group);
 		axis_max_label_ = new QLabel(L("JoypadToOBS.Field.AxisMaxValue"), device_group);
 		axis_set_min_button_ = new QPushButton(L("JoypadToOBS.Button.SetMin"), device_group);
@@ -433,12 +453,16 @@ public:
 		device_layout->addWidget(axis_value_slider_, 2, 1);
 		device_layout->addWidget(axis_live_value_label_, 2, 2);
 		device_layout->addWidget(axis_threshold_label_, 3, 0);
-		device_layout->addWidget(axis_threshold_combo_, 3, 1, 1, 2);
-		device_layout->addWidget(axis_both_checkbox_, 4, 0, 1, 2);
-		device_layout->addWidget(axis_min_label_, 5, 0);
-		device_layout->addWidget(axis_set_min_button_, 5, 1);
-		device_layout->addWidget(axis_max_label_, 6, 0);
-		device_layout->addWidget(axis_set_max_button_, 6, 1);
+		device_layout->addWidget(axis_threshold_spin_, 3, 1, 1, 2);
+		device_layout->addWidget(axis_min_per_second_label_, 4, 0);
+		device_layout->addWidget(axis_min_per_second_spin_, 4, 1, 1, 2);
+		device_layout->addWidget(axis_max_per_second_label_, 5, 0);
+		device_layout->addWidget(axis_max_per_second_spin_, 5, 1, 1, 2);
+		device_layout->addWidget(axis_both_checkbox_, 6, 0, 1, 2);
+		device_layout->addWidget(axis_min_label_, 7, 0);
+		device_layout->addWidget(axis_set_min_button_, 7, 1);
+		device_layout->addWidget(axis_max_label_, 8, 0);
+		device_layout->addWidget(axis_set_max_button_, 8, 1);
 
 		layout->addWidget(device_group);
 
@@ -532,17 +556,29 @@ public:
 		connect(test_mode_checkbox_, &QCheckBox::toggled, this, [this](bool) { PublishTestBinding(); });
 		connect(listen_button_, &QPushButton::clicked, this, &JoypadBindingDialog::OnListen);
 		connect(action_combo_, &QComboBox::currentIndexChanged, this, &JoypadBindingDialog::UpdateActionUi);
-		connect(action_combo_, &QComboBox::currentIndexChanged, this, [this](int) { PublishTestBinding(); });
-		connect(device_combo_, &QComboBox::currentIndexChanged, this, [this](int) { PublishTestBinding(); });
-		connect(scene_combo_, &QComboBox::currentIndexChanged, this, [this](int) { PublishTestBinding(); });
-		connect(source_combo_, &QComboBox::currentIndexChanged, this, [this](int) { PublishTestBinding(); });
-		connect(filter_combo_, &QComboBox::currentIndexChanged, this, [this](int) { PublishTestBinding(); });
-		connect(bool_checkbox_, &QCheckBox::toggled, this, [this](bool) { PublishTestBinding(); });
-		connect(use_current_scene_, &QCheckBox::toggled, this, [this](bool) { PublishTestBinding(); });
-		connect(axis_both_checkbox_, &QCheckBox::toggled, this, [this](bool) { PublishTestBinding(); });
-		connect(axis_threshold_combo_, &QComboBox::currentIndexChanged, this,
-			[this](int) { PublishTestBinding(); });
+		connect(action_combo_, &QComboBox::currentIndexChanged, this,
+			[this](int) { DisableTestModeOnConfigChange(); });
+		connect(device_combo_, &QComboBox::currentIndexChanged, this,
+			[this](int) { DisableTestModeOnConfigChange(); });
+		connect(scene_combo_, &QComboBox::currentIndexChanged, this,
+			[this](int) { DisableTestModeOnConfigChange(); });
+		connect(source_combo_, &QComboBox::currentIndexChanged, this,
+			[this](int) { DisableTestModeOnConfigChange(); });
+		connect(filter_combo_, &QComboBox::currentIndexChanged, this,
+			[this](int) { DisableTestModeOnConfigChange(); });
+		connect(bool_checkbox_, &QCheckBox::toggled, this, [this](bool) { DisableTestModeOnConfigChange(); });
+		connect(use_current_scene_, &QCheckBox::toggled, this,
+			[this](bool) { DisableTestModeOnConfigChange(); });
+		connect(axis_both_checkbox_, &QCheckBox::toggled, this,
+			[this](bool) { DisableTestModeOnConfigChange(); });
+		connect(axis_threshold_spin_, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,
+			[this](double) { DisableTestModeOnConfigChange(); });
+		connect(axis_min_per_second_spin_, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,
+			[this](double) { DisableTestModeOnConfigChange(); });
+		connect(axis_max_per_second_spin_, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,
+			[this](double) { DisableTestModeOnConfigChange(); });
 		connect(volume_spin_, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this](double value) {
+			DisableTestModeOnConfigChange();
 			if (CurrentAction() != JoypadActionType::SetSourceVolumePercent) {
 				return;
 			}
@@ -555,11 +591,10 @@ public:
 			axis_value_slider_->setValue((int)percent);
 			axis_live_value_label_->setText(L("JoypadToOBS.Common.PercentValue").arg(percent, 0, 'f', 0) +
 							" " + L("JoypadToOBS.Common.DbValue").arg(db, 0, 'f', 1));
-			PublishTestBinding();
 		});
 		connect(invert_axis_checkbox_, &QCheckBox::toggled, this, [this](bool) {
+			DisableTestModeOnConfigChange();
 			if (CurrentAction() != JoypadActionType::SetSourceVolumePercent) {
-				PublishTestBinding();
 				return;
 			}
 			if (!learned_event_.is_axis) {
@@ -570,24 +605,23 @@ public:
 			axis_value_slider_->setValue((int)percent);
 			axis_live_value_label_->setText(L("JoypadToOBS.Common.PercentValue").arg(percent, 0, 'f', 0) +
 							" " + L("JoypadToOBS.Common.DbValue").arg(db, 0, 'f', 1));
-			PublishTestBinding();
 		});
 		connect(volume_allow_above_unity_, &QCheckBox::toggled, this, [this](bool checked) {
 			binding_.allow_above_unity = checked;
-			PublishTestBinding();
+			DisableTestModeOnConfigChange();
 		});
 		connect(source_combo_, &QComboBox::currentIndexChanged, this, &JoypadBindingDialog::ReloadFilters);
 		connect(axis_set_min_button_, &QPushButton::clicked, this, [this]() {
 			binding_.axis_min_value = last_axis_value_;
 			axis_min_label_->setText(L("JoypadToOBS.Field.AxisMinValue") + ": " +
 						 QString::number(binding_.axis_min_value, 'f', 2));
-			PublishTestBinding();
+			DisableTestModeOnConfigChange();
 		});
 		connect(axis_set_max_button_, &QPushButton::clicked, this, [this]() {
 			binding_.axis_max_value = last_axis_value_;
 			axis_max_label_->setText(L("JoypadToOBS.Field.AxisMaxValue") + ": " +
 						 QString::number(binding_.axis_max_value, 'f', 2));
-			PublishTestBinding();
+			DisableTestModeOnConfigChange();
 		});
 		if (input_) {
 			axis_handler_id_ = input_->AddOnAxisChanged([this](const JoypadEvent &event) {
@@ -634,6 +668,7 @@ public:
 			});
 		}
 		connect(use_current_scene_, &QCheckBox::toggled, this, [this](bool checked) {
+			DisableTestModeOnConfigChange();
 			if (checked) {
 				obs_source_t *scene = obs_frontend_get_current_scene();
 				if (scene) {
@@ -684,16 +719,25 @@ protected:
 	}
 
 private:
+	void DisableTestModeOnConfigChange()
+	{
+		if (test_mode_checkbox_ && test_mode_checkbox_->isChecked()) {
+			test_mode_checkbox_->setChecked(false);
+		}
+	}
+
 	void PublishTestBinding()
 	{
 		if (!test_mode_checkbox_ || !test_mode_checkbox_->isChecked()) {
 			std::lock_guard<std::mutex> lock(g_dialog_test_mutex);
 			g_dialog_test_state.enabled = false;
+			g_dialog_axis_last_dispatch.clear();
 			return;
 		}
 		if (!ReadBinding(false)) {
 			std::lock_guard<std::mutex> lock(g_dialog_test_mutex);
 			g_dialog_test_state.enabled = false;
+			g_dialog_axis_last_dispatch.clear();
 			return;
 		}
 		JoypadBinding test = binding_;
@@ -704,6 +748,7 @@ private:
 		std::lock_guard<std::mutex> lock(g_dialog_test_mutex);
 		g_dialog_test_state.enabled = true;
 		g_dialog_test_state.binding = test;
+		g_dialog_axis_last_dispatch.clear();
 	}
 
 	void PopulateDeviceCombo()
@@ -784,19 +829,17 @@ private:
 		axis_value_slider_->setVisible(visible);
 		axis_live_value_label_->setVisible(visible);
 		axis_threshold_label_->setVisible(visible && !hide_axis_options);
-		axis_threshold_combo_->setVisible(visible && !hide_axis_options);
+		axis_threshold_spin_->setVisible(visible && !hide_axis_options);
+		axis_min_per_second_label_->setVisible(visible && !hide_axis_options);
+		axis_min_per_second_spin_->setVisible(visible && !hide_axis_options);
+		axis_max_per_second_label_->setVisible(visible && !hide_axis_options);
+		axis_max_per_second_spin_->setVisible(visible && !hide_axis_options);
 		axis_both_checkbox_->setVisible(visible && !hide_axis_options);
 		invert_axis_checkbox_->setVisible(visible);
 		axis_min_label_->setVisible(visible && hide_axis_options);
 		axis_max_label_->setVisible(visible && hide_axis_options);
 		axis_set_min_button_->setVisible(visible && hide_axis_options);
 		axis_set_max_button_->setVisible(visible && hide_axis_options);
-		if (!visible) {
-			axis_both_checkbox_->setChecked(false);
-		}
-		if (hide_axis_options) {
-			axis_both_checkbox_->setChecked(false);
-		}
 	}
 
 	void ApplyBinding(const JoypadBinding &binding)
@@ -827,10 +870,9 @@ private:
 				axis_value_slider_->setValue((int)binding.axis_min_value);
 				axis_live_value_label_->setText(QString::number(last_axis_value_, 'f', 2));
 			}
-			int idx = axis_threshold_combo_->findData(binding.axis_threshold);
-			if (idx >= 0) {
-				axis_threshold_combo_->setCurrentIndex(idx);
-			}
+			axis_threshold_spin_->setValue(std::clamp(binding.axis_threshold, 0.0, 0.95));
+			axis_min_per_second_spin_->setValue(std::clamp(binding.axis_min_per_second, 1.0, 60.0));
+			axis_max_per_second_spin_->setValue(std::clamp(binding.axis_max_per_second, 1.0, 60.0));
 			axis_both_checkbox_->setChecked(binding.axis_direction == JoypadAxisDirection::Both);
 			invert_axis_checkbox_->setChecked(binding.axis_inverted ||
 							  binding.axis_direction == JoypadAxisDirection::Negative);
@@ -973,16 +1015,16 @@ private:
 		}
 
 		if (action == JoypadActionType::AdjustSourceVolume) {
-			volume_spin_->setRange(-1.0, 1.0);
-			volume_spin_->setSingleStep(0.05);
-			volume_spin_->setDecimals(2);
-			volume_spin_->setSuffix("x");
+			volume_spin_->setRange(-20.0, 20.0);
+			volume_spin_->setSingleStep(0.1);
+			volume_spin_->setDecimals(1);
+			volume_spin_->setSuffix(" dB");
 			if (volume_spin_->value() == 0.0) {
-				volume_spin_->setValue(0.05);
+				volume_spin_->setValue(0.1);
 			}
 		} else if (action == JoypadActionType::SetSourceVolume) {
 			volume_spin_->setRange(-60.0, 20.0);
-			volume_spin_->setSingleStep(1.0);
+			volume_spin_->setSingleStep(0.1);
 			volume_spin_->setDecimals(1);
 			volume_spin_->setSuffix(" dB");
 		} else if (action == JoypadActionType::SetSourceVolumePercent) {
@@ -1097,7 +1139,7 @@ private:
 						}
 					}
 					SelectDevice(event);
-					PublishTestBinding();
+					DisableTestModeOnConfigChange();
 				},
 				Qt::QueuedConnection);
 		});
@@ -1157,7 +1199,12 @@ private:
 								  ? JoypadAxisDirection::Positive
 								  : JoypadAxisDirection::Negative;
 			}
-			binding_.axis_threshold = axis_threshold_combo_->currentData().toDouble();
+			binding_.axis_threshold = std::clamp(axis_threshold_spin_->value(), 0.0, 0.95);
+			binding_.axis_min_per_second = std::clamp(axis_min_per_second_spin_->value(), 1.0, 60.0);
+			binding_.axis_max_per_second = std::clamp(axis_max_per_second_spin_->value(), 1.0, 60.0);
+			if (binding_.axis_max_per_second < binding_.axis_min_per_second) {
+				binding_.axis_max_per_second = binding_.axis_min_per_second;
+			}
 			binding_.axis_interval_ms = 150;
 			binding_.axis_min_value = binding_.axis_min_value;
 			binding_.axis_max_value = binding_.axis_max_value;
@@ -1165,7 +1212,9 @@ private:
 			binding_.input_type = JoypadInputType::Button;
 			binding_.axis_index = -1;
 			binding_.axis_inverted = false;
-			binding_.axis_threshold = 0.5;
+			binding_.axis_threshold = 0.10;
+			binding_.axis_min_per_second = 2.5;
+			binding_.axis_max_per_second = 20.0;
 		}
 
 		binding_.action = CurrentAction();
@@ -1192,7 +1241,9 @@ private:
 		if (binding_.input_type != JoypadInputType::Axis) {
 			binding_.axis_index = -1;
 			binding_.axis_inverted = false;
-			binding_.axis_threshold = 0.5;
+			binding_.axis_threshold = 0.10;
+			binding_.axis_min_per_second = 2.5;
+			binding_.axis_max_per_second = 20.0;
 			binding_.axis_min_value = 0.0;
 			binding_.axis_max_value = 1024.0;
 		}
@@ -1263,7 +1314,11 @@ private:
 	QLabel *axis_value_label_ = nullptr;
 	QSlider *axis_value_slider_ = nullptr;
 	QLabel *axis_threshold_label_ = nullptr;
-	QComboBox *axis_threshold_combo_ = nullptr;
+	QDoubleSpinBox *axis_threshold_spin_ = nullptr;
+	QLabel *axis_min_per_second_label_ = nullptr;
+	QDoubleSpinBox *axis_min_per_second_spin_ = nullptr;
+	QLabel *axis_max_per_second_label_ = nullptr;
+	QDoubleSpinBox *axis_max_per_second_spin_ = nullptr;
 	QCheckBox *axis_both_checkbox_ = nullptr;
 	QLabel *axis_live_value_label_ = nullptr;
 	QLabel *axis_min_label_ = nullptr;
@@ -1358,13 +1413,34 @@ bool JoypadUiEmulateBindingDialogAction(const JoypadEvent &event, JoypadActionEn
 			return true;
 		}
 	}
-	if (abs_value < binding.axis_threshold) {
+	double threshold_clamped = std::clamp(binding.axis_threshold, 0.0, 0.95);
+	if (abs_value < threshold_clamped) {
 		return true;
+	}
+	const auto now = std::chrono::steady_clock::now();
+	const double min_rate = std::clamp(binding.axis_min_per_second, 1.0, 60.0);
+	const double max_rate = std::clamp(binding.axis_max_per_second, min_rate, 60.0);
+	const double intensity = std::clamp((abs_value - threshold_clamped) / (1.0 - threshold_clamped), 0.0, 1.0);
+	const double rate = min_rate + (max_rate - min_rate) * intensity;
+	const int dynamic_interval_ms = std::max((int)std::round(1000.0 / std::max(rate, 0.001)), 1);
+	std::string interval_key = binding.device_id + ":" + std::to_string(binding.axis_index) + ":" +
+				   std::to_string((int)binding.action) + ":" + binding.source_name + ":" +
+				   binding.filter_name;
+	{
+		std::lock_guard<std::mutex> lock(g_dialog_test_mutex);
+		auto it_last = g_dialog_axis_last_dispatch.find(interval_key);
+		if (it_last != g_dialog_axis_last_dispatch.end()) {
+			const auto elapsed =
+				std::chrono::duration_cast<std::chrono::milliseconds>(now - it_last->second).count();
+			if (elapsed < dynamic_interval_ms) {
+				return true;
+			}
+		}
+		g_dialog_axis_last_dispatch[interval_key] = now;
 	}
 	if (binding.action == JoypadActionType::AdjustSourceVolume) {
 		double sign = value >= 0.0 ? 1.0 : -1.0;
-		double intensity = std::clamp(abs_value, 0.0, 1.0);
-		adjusted.volume_value = std::fabs(binding.volume_value) * intensity * sign;
+		adjusted.volume_value = std::fabs(binding.volume_value) * sign;
 	}
 	actions->Execute(adjusted);
 	return true;

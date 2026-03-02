@@ -93,6 +93,7 @@ private:
 	std::mutex handler_mutex_;
 	std::function<void(const JoypadEvent &)> on_button_pressed_;
 	std::function<void(const JoypadEvent &)> learn_handler_;
+	std::atomic<bool> learn_active_{false};
 	struct AxisHandlerEntry {
 		int id = 0;
 		std::function<void(const JoypadEvent &)> handler;
