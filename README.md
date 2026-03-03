@@ -92,6 +92,8 @@ If OSD notifications are enabled, this hotkey also shows the current listening s
 
 *   **OBS Studio:** Version 28 or newer.
 *   **Operating System:** Windows 10/11 (recommended). macOS and modern Linux distributions are available in experimental mode.
+*   **CMake:** 3.28 or newer.
+*   **PowerShell:** 7.2+ (required for the local CI simulation script).
 
 ## How to Use
 
@@ -112,14 +114,26 @@ If OSD notifications are enabled, this hotkey also shows the current listening s
 
 ## Building from Source
 
-If you want to build the plugin yourself, clone the repository recursively and use CMake.
+If you want to build the plugin yourself, clone the repository recursively and use CMake presets.
+
+### Windows (recommended)
 
 ```bash
 git clone --recursive https://github.com/FabioZumbi12/joypad-to-obs.git
 cd joypad-to-obs
-mkdir build && cd build
-cmake ..
-cmake --build . --config Release
+cmake --preset windows-x64
+cmake --build --preset windows-x64
+```
+
+This uses `build_x64` and the `RelWithDebInfo` configuration, matching the project defaults and installer script.
+
+### Generic CMake flow (advanced)
+
+```bash
+git clone --recursive https://github.com/FabioZumbi12/joypad-to-obs.git
+cd joypad-to-obs
+cmake -S . -B build_x64
+cmake --build build_x64 --config Release --target joypad-to-obs
 ```
 
 ### Simulate GitHub Actions Build (Windows)
@@ -129,6 +143,8 @@ To run a local build flow close to the `windows-2022` GitHub Actions job, use:
 ```powershell
 pwsh -File .\scripts\ci-local-windows.ps1
 ```
+
+If you previously configured `build_x64` with another Visual Studio generator/version, run with `-CleanBuild` to avoid CMake generator mismatch errors.
 
 Useful options:
 
