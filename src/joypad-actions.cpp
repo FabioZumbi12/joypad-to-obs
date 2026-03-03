@@ -30,6 +30,7 @@ namespace {
 constexpr float kMinDb = -60.0f;
 constexpr float kMaxDb = 50.0f;
 constexpr float kVolumeEpsilon = 0.0005f;
+constexpr uint32_t kAlignCenter = 0;
 
 static float db_to_mul(float db)
 {
@@ -92,6 +93,70 @@ obs_sceneitem_t *get_scene_item_from_binding(const JoypadBinding &binding, obs_s
 	}
 
 	return item;
+}
+
+void apply_sceneitem_alignment(obs_sceneitem_t *item, JoypadSourceTransformOp op)
+{
+	obs_video_info ovi = {};
+	if (!obs_get_video_info(&ovi) || ovi.base_width == 0 || ovi.base_height == 0) {
+		return;
+	}
+
+	struct vec2 box = {};
+	obs_sceneitem_get_box_scale(item, &box);
+	const float width = std::fabs(box.x);
+	const float height = std::fabs(box.y);
+
+	struct vec2 pos = {};
+	obs_sceneitem_get_pos(item, &pos);
+	obs_sceneitem_set_alignment(item, kAlignCenter);
+
+	switch (op) {
+	case JoypadSourceTransformOp::AlignLeft:
+		pos.x = width * 0.5f;
+		break;
+	case JoypadSourceTransformOp::AlignRight:
+		pos.x = (float)ovi.base_width - width * 0.5f;
+		break;
+	case JoypadSourceTransformOp::AlignTop:
+		pos.y = height * 0.5f;
+		break;
+	case JoypadSourceTransformOp::AlignBottom:
+		pos.y = (float)ovi.base_height - height * 0.5f;
+		break;
+	case JoypadSourceTransformOp::AlignTopLeft:
+		pos.x = width * 0.5f;
+		pos.y = height * 0.5f;
+		break;
+	case JoypadSourceTransformOp::AlignTopRight:
+		pos.x = (float)ovi.base_width - width * 0.5f;
+		pos.y = height * 0.5f;
+		break;
+	case JoypadSourceTransformOp::AlignBottomLeft:
+		pos.x = width * 0.5f;
+		pos.y = (float)ovi.base_height - height * 0.5f;
+		break;
+	case JoypadSourceTransformOp::AlignBottomRight:
+		pos.x = (float)ovi.base_width - width * 0.5f;
+		pos.y = (float)ovi.base_height - height * 0.5f;
+		break;
+	case JoypadSourceTransformOp::AlignCenterLeft:
+		pos.x = width * 0.5f;
+		pos.y = (float)ovi.base_height * 0.5f;
+		break;
+	case JoypadSourceTransformOp::AlignCenterRight:
+		pos.x = (float)ovi.base_width - width * 0.5f;
+		pos.y = (float)ovi.base_height * 0.5f;
+		break;
+	case JoypadSourceTransformOp::CenterToScreen:
+		pos.x = (float)ovi.base_width * 0.5f;
+		pos.y = (float)ovi.base_height * 0.5f;
+		break;
+	default:
+		break;
+	}
+
+	obs_sceneitem_set_pos(item, &pos);
 }
 
 } // namespace
@@ -422,6 +487,87 @@ void JoypadActionEngine::Execute(const JoypadBinding &binding)
 		obs_properties_destroy(props);
 		obs_source_release(filter);
 		obs_source_release(source);
+		break;
+	}
+	case JoypadActionType::SourceTransform: {
+		if (binding.source_name.empty()) {
+			return;
+		}
+
+		obs_source_t *scene_source = nullptr;
+		obs_sceneitem_t *item = get_scene_item_from_binding(binding, &scene_source);
+		if (!item) {
+			return;
+		}
+
+		switch (binding.source_transform_op) {
+		case JoypadSourceTransformOp::FlipHorizontal: {
+			struct vec2 scale = {};
+			obs_sceneitem_get_scale(item, &scale);
+			scale.x = -scale.x;
+			obs_sceneitem_set_scale(item, &scale);
+			break;
+		}
+		case JoypadSourceTransformOp::FlipVertical: {
+			struct vec2 scale = {};
+			obs_sceneitem_get_scale(item, &scale);
+			scale.y = -scale.y;
+			obs_sceneitem_set_scale(item, &scale);
+			break;
+		}
+		case JoypadSourceTransformOp::Rotate90CW:
+			obs_sceneitem_set_rot(item, obs_sceneitem_get_rot(item) + 90.0f);
+			break;
+		case JoypadSourceTransformOp::Rotate90CCW:
+			obs_sceneitem_set_rot(item, obs_sceneitem_get_rot(item) - 90.0f);
+			break;
+		case JoypadSourceTransformOp::Rotate180:
+			obs_sceneitem_set_rot(item, obs_sceneitem_get_rot(item) + 180.0f);
+			break;
+		case JoypadSourceTransformOp::FitToScreen: {
+			obs_video_info ovi = {};
+			if (obs_get_video_info(&ovi) && ovi.base_width > 0 && ovi.base_height > 0) {
+				struct vec2 pos = {(float)ovi.base_width * 0.5f, (float)ovi.base_height * 0.5f};
+				struct vec2 bounds = {(float)ovi.base_width, (float)ovi.base_height};
+				obs_sceneitem_set_alignment(item, kAlignCenter);
+				obs_sceneitem_set_pos(item, &pos);
+				obs_sceneitem_set_bounds_type(item, OBS_BOUNDS_SCALE_INNER);
+				obs_sceneitem_set_bounds_alignment(item, kAlignCenter);
+				obs_sceneitem_set_bounds(item, &bounds);
+			}
+			break;
+		}
+		case JoypadSourceTransformOp::StretchToScreen: {
+			obs_video_info ovi = {};
+			if (obs_get_video_info(&ovi) && ovi.base_width > 0 && ovi.base_height > 0) {
+				struct vec2 pos = {(float)ovi.base_width * 0.5f, (float)ovi.base_height * 0.5f};
+				struct vec2 bounds = {(float)ovi.base_width, (float)ovi.base_height};
+				obs_sceneitem_set_alignment(item, kAlignCenter);
+				obs_sceneitem_set_pos(item, &pos);
+				obs_sceneitem_set_bounds_type(item, OBS_BOUNDS_STRETCH);
+				obs_sceneitem_set_bounds_alignment(item, kAlignCenter);
+				obs_sceneitem_set_bounds(item, &bounds);
+			}
+			break;
+		}
+		case JoypadSourceTransformOp::AlignLeft:
+		case JoypadSourceTransformOp::AlignRight:
+		case JoypadSourceTransformOp::AlignTop:
+		case JoypadSourceTransformOp::AlignBottom:
+		case JoypadSourceTransformOp::AlignTopLeft:
+		case JoypadSourceTransformOp::AlignTopRight:
+		case JoypadSourceTransformOp::AlignBottomLeft:
+		case JoypadSourceTransformOp::AlignBottomRight:
+		case JoypadSourceTransformOp::AlignCenterLeft:
+		case JoypadSourceTransformOp::AlignCenterRight:
+		case JoypadSourceTransformOp::CenterToScreen:
+			apply_sceneitem_alignment(item, binding.source_transform_op);
+			break;
+		default:
+			break;
+		}
+
+		release_scene_source(scene_source, binding);
 		break;
 	}
 	case JoypadActionType::NextScene:

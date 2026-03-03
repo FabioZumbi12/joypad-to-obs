@@ -50,6 +50,7 @@ enum class JoypadActionType {
 	TransitionToProgram = 19,
 	SetFilterProperty = 20,
 	AdjustFilterProperty = 21,
+	SourceTransform = 22,
 };
 
 enum class JoypadInputType {
@@ -73,6 +74,27 @@ enum class JoypadOsdPosition {
 	BottomLeft = 6,
 	BottomCenter = 7,
 	BottomRight = 8
+};
+
+enum class JoypadSourceTransformOp {
+	FlipHorizontal = 0,
+	FlipVertical = 1,
+	AlignLeft = 2,
+	AlignRight = 3,
+	AlignTop = 4,
+	AlignBottom = 5,
+	AlignTopLeft = 6,
+	AlignTopRight = 7,
+	AlignBottomLeft = 8,
+	AlignBottomRight = 9,
+	AlignCenterLeft = 10,
+	AlignCenterRight = 11,
+	Rotate90CW = 12,
+	Rotate90CCW = 13,
+	Rotate180 = 14,
+	CenterToScreen = 15,
+	FitToScreen = 16,
+	StretchToScreen = 17,
 };
 
 struct JoypadBinding {
@@ -109,6 +131,7 @@ struct JoypadBinding {
 	std::string filter_property_list_string;
 	long long filter_property_list_int = 0;
 	double filter_property_list_float = 0.0;
+	JoypadSourceTransformOp source_transform_op = JoypadSourceTransformOp::CenterToScreen;
 
 	bool bool_value = false;
 	bool allow_above_unity = false;

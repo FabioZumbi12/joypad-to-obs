@@ -185,6 +185,52 @@ QString action_to_text(JoypadActionType action)
 		return L("JoypadToOBS.Action.SetFilterProperty");
 	case JoypadActionType::AdjustFilterProperty:
 		return L("JoypadToOBS.Action.AdjustFilterProperty");
+	case JoypadActionType::SourceTransform:
+		return L("JoypadToOBS.Action.SourceTransform");
+	default:
+		return L("JoypadToOBS.Common.Unknown");
+	}
+}
+
+QString source_transform_to_text(JoypadSourceTransformOp op)
+{
+	switch (op) {
+	case JoypadSourceTransformOp::FlipHorizontal:
+		return L("JoypadToOBS.Transform.FlipHorizontal");
+	case JoypadSourceTransformOp::FlipVertical:
+		return L("JoypadToOBS.Transform.FlipVertical");
+	case JoypadSourceTransformOp::AlignLeft:
+		return L("JoypadToOBS.Transform.AlignLeft");
+	case JoypadSourceTransformOp::AlignRight:
+		return L("JoypadToOBS.Transform.AlignRight");
+	case JoypadSourceTransformOp::AlignTop:
+		return L("JoypadToOBS.Transform.AlignTop");
+	case JoypadSourceTransformOp::AlignBottom:
+		return L("JoypadToOBS.Transform.AlignBottom");
+	case JoypadSourceTransformOp::AlignTopLeft:
+		return L("JoypadToOBS.Transform.AlignTopLeft");
+	case JoypadSourceTransformOp::AlignTopRight:
+		return L("JoypadToOBS.Transform.AlignTopRight");
+	case JoypadSourceTransformOp::AlignBottomLeft:
+		return L("JoypadToOBS.Transform.AlignBottomLeft");
+	case JoypadSourceTransformOp::AlignBottomRight:
+		return L("JoypadToOBS.Transform.AlignBottomRight");
+	case JoypadSourceTransformOp::AlignCenterLeft:
+		return L("JoypadToOBS.Transform.AlignCenterLeft");
+	case JoypadSourceTransformOp::AlignCenterRight:
+		return L("JoypadToOBS.Transform.AlignCenterRight");
+	case JoypadSourceTransformOp::Rotate90CW:
+		return L("JoypadToOBS.Transform.Rotate90CW");
+	case JoypadSourceTransformOp::Rotate90CCW:
+		return L("JoypadToOBS.Transform.Rotate90CCW");
+	case JoypadSourceTransformOp::Rotate180:
+		return L("JoypadToOBS.Transform.Rotate180");
+	case JoypadSourceTransformOp::CenterToScreen:
+		return L("JoypadToOBS.Transform.CenterToScreen");
+	case JoypadSourceTransformOp::FitToScreen:
+		return L("JoypadToOBS.Transform.FitToScreen");
+	case JoypadSourceTransformOp::StretchToScreen:
+		return L("JoypadToOBS.Transform.StretchToScreen");
 	default:
 		return L("JoypadToOBS.Common.Unknown");
 	}
@@ -234,6 +280,8 @@ QString binding_details(const JoypadBinding &binding)
 			return L("JoypadToOBS.Common.PositiveValue").arg(binding.volume_value, 0, 'f', 3);
 		}
 		return QString::number(binding.volume_value, 'f', 3);
+	case JoypadActionType::SourceTransform:
+		return source_transform_to_text(binding.source_transform_op);
 	default:
 		return QString();
 	}
@@ -625,6 +673,46 @@ public:
 		filter_property_label_ = new QLabel(L("JoypadToOBS.Field.FilterProperty"), target_group);
 		target_layout->addWidget(filter_property_label_, 4, 0);
 		target_layout->addWidget(filter_property_combo_, 4, 1);
+		transform_op_label_ = new QLabel(L("JoypadToOBS.Field.Transform"), target_group);
+		transform_op_combo_ = new QComboBox(target_group);
+		transform_op_combo_->addItem(source_transform_to_text(JoypadSourceTransformOp::FlipHorizontal),
+					     (int)JoypadSourceTransformOp::FlipHorizontal);
+		transform_op_combo_->addItem(source_transform_to_text(JoypadSourceTransformOp::FlipVertical),
+					     (int)JoypadSourceTransformOp::FlipVertical);
+		transform_op_combo_->addItem(source_transform_to_text(JoypadSourceTransformOp::AlignLeft),
+					     (int)JoypadSourceTransformOp::AlignLeft);
+		transform_op_combo_->addItem(source_transform_to_text(JoypadSourceTransformOp::AlignRight),
+					     (int)JoypadSourceTransformOp::AlignRight);
+		transform_op_combo_->addItem(source_transform_to_text(JoypadSourceTransformOp::AlignTop),
+					     (int)JoypadSourceTransformOp::AlignTop);
+		transform_op_combo_->addItem(source_transform_to_text(JoypadSourceTransformOp::AlignBottom),
+					     (int)JoypadSourceTransformOp::AlignBottom);
+		transform_op_combo_->addItem(source_transform_to_text(JoypadSourceTransformOp::AlignTopLeft),
+					     (int)JoypadSourceTransformOp::AlignTopLeft);
+		transform_op_combo_->addItem(source_transform_to_text(JoypadSourceTransformOp::AlignTopRight),
+					     (int)JoypadSourceTransformOp::AlignTopRight);
+		transform_op_combo_->addItem(source_transform_to_text(JoypadSourceTransformOp::AlignBottomLeft),
+					     (int)JoypadSourceTransformOp::AlignBottomLeft);
+		transform_op_combo_->addItem(source_transform_to_text(JoypadSourceTransformOp::AlignBottomRight),
+					     (int)JoypadSourceTransformOp::AlignBottomRight);
+		transform_op_combo_->addItem(source_transform_to_text(JoypadSourceTransformOp::AlignCenterLeft),
+					     (int)JoypadSourceTransformOp::AlignCenterLeft);
+		transform_op_combo_->addItem(source_transform_to_text(JoypadSourceTransformOp::AlignCenterRight),
+					     (int)JoypadSourceTransformOp::AlignCenterRight);
+		transform_op_combo_->addItem(source_transform_to_text(JoypadSourceTransformOp::Rotate90CW),
+					     (int)JoypadSourceTransformOp::Rotate90CW);
+		transform_op_combo_->addItem(source_transform_to_text(JoypadSourceTransformOp::Rotate90CCW),
+					     (int)JoypadSourceTransformOp::Rotate90CCW);
+		transform_op_combo_->addItem(source_transform_to_text(JoypadSourceTransformOp::Rotate180),
+					     (int)JoypadSourceTransformOp::Rotate180);
+		transform_op_combo_->addItem(source_transform_to_text(JoypadSourceTransformOp::CenterToScreen),
+					     (int)JoypadSourceTransformOp::CenterToScreen);
+		transform_op_combo_->addItem(source_transform_to_text(JoypadSourceTransformOp::FitToScreen),
+					     (int)JoypadSourceTransformOp::FitToScreen);
+		transform_op_combo_->addItem(source_transform_to_text(JoypadSourceTransformOp::StretchToScreen),
+					     (int)JoypadSourceTransformOp::StretchToScreen);
+		target_layout->addWidget(transform_op_label_, 5, 0);
+		target_layout->addWidget(transform_op_combo_, 5, 1);
 
 		auto *action_group = new QGroupBox(L("JoypadToOBS.Group.Action"));
 		auto *action_layout = new QGridLayout(action_group);
@@ -662,6 +750,8 @@ public:
 				       (int)JoypadActionType::SetFilterProperty);
 		action_combo_->addItem(action_to_text(JoypadActionType::AdjustFilterProperty),
 				       (int)JoypadActionType::AdjustFilterProperty);
+		action_combo_->addItem(action_to_text(JoypadActionType::SourceTransform),
+				       (int)JoypadActionType::SourceTransform);
 		action_combo_->addItem(action_to_text(JoypadActionType::ToggleStreaming),
 				       (int)JoypadActionType::ToggleStreaming);
 		action_combo_->addItem(action_to_text(JoypadActionType::ToggleRecording),
@@ -723,6 +813,8 @@ public:
 		connect(filter_property_combo_, &QComboBox::currentIndexChanged, this,
 			[this](int) { UpdateActionUi(); });
 		connect(filter_property_list_combo_, &QComboBox::currentIndexChanged, this,
+			[this](int) { DisableTestModeOnConfigChange(); });
+		connect(transform_op_combo_, &QComboBox::currentIndexChanged, this,
 			[this](int) { DisableTestModeOnConfigChange(); });
 		connect(bool_checkbox_, &QCheckBox::toggled, this, [this](bool) { DisableTestModeOnConfigChange(); });
 		connect(use_current_scene_, &QCheckBox::toggled, this,
@@ -1126,6 +1218,7 @@ private:
 				filter_property_combo_->setCurrentIndex(property_idx);
 			}
 		}
+		transform_op_combo_->setCurrentIndex(transform_op_combo_->findData((int)binding.source_transform_op));
 
 		bool_checkbox_->setChecked(binding.bool_value);
 		volume_allow_above_unity_->setChecked(binding.allow_above_unity);
@@ -1322,13 +1415,18 @@ private:
 			(action == JoypadActionType::MediaStop) || (action == JoypadActionType::ToggleFilterEnabled) ||
 			(action == JoypadActionType::SetFilterEnabled) ||
 			(action == JoypadActionType::SetFilterProperty) ||
-			(action == JoypadActionType::AdjustFilterProperty);
+			(action == JoypadActionType::AdjustFilterProperty) ||
+			(action == JoypadActionType::SourceTransform);
+		if (action == JoypadActionType::SourceTransform) {
+			needs_scene = true;
+		}
 		bool needs_filter = (action == JoypadActionType::ToggleFilterEnabled) ||
 				    (action == JoypadActionType::SetFilterEnabled) ||
 				    (action == JoypadActionType::SetFilterProperty) ||
 				    (action == JoypadActionType::AdjustFilterProperty);
 		bool needs_filter_property = (action == JoypadActionType::SetFilterProperty) ||
 					     (action == JoypadActionType::AdjustFilterProperty);
+		bool needs_transform_op = (action == JoypadActionType::SourceTransform);
 
 		scene_combo_->setEnabled(needs_scene);
 		use_current_scene_->setEnabled(needs_scene && action != JoypadActionType::SwitchScene);
@@ -1340,6 +1438,9 @@ private:
 		filter_property_label_->setVisible(needs_filter_property);
 		filter_property_combo_->setVisible(needs_filter_property);
 		filter_property_combo_->setEnabled(needs_filter_property);
+		transform_op_label_->setVisible(needs_transform_op);
+		transform_op_combo_->setVisible(needs_transform_op);
+		transform_op_combo_->setEnabled(needs_transform_op);
 
 		ReloadSourcesForAction(action);
 		ReloadFilters();
@@ -1711,6 +1812,7 @@ private:
 		binding_.source_name = source_combo_->currentData().toString().toStdString();
 		binding_.filter_name = filter_combo_->currentText().toStdString();
 		binding_.filter_property_name = filter_property_combo_->currentData().toString().toStdString();
+		binding_.source_transform_op = (JoypadSourceTransformOp)transform_op_combo_->currentData().toInt();
 		binding_.bool_value = bool_checkbox_->isChecked();
 		bool is_volume_action = (binding_.action == JoypadActionType::SetSourceVolume) ||
 					(binding_.action == JoypadActionType::AdjustSourceVolume) ||
@@ -1777,9 +1879,11 @@ private:
 
 		bool needs_scene = (binding_.action == JoypadActionType::SwitchScene) ||
 				   (binding_.action == JoypadActionType::ToggleSourceVisibility) ||
-				   (binding_.action == JoypadActionType::SetSourceVisibility);
+				   (binding_.action == JoypadActionType::SetSourceVisibility) ||
+				   (binding_.action == JoypadActionType::SourceTransform);
 		bool needs_use_current = (binding_.action == JoypadActionType::ToggleSourceVisibility ||
-					  binding_.action == JoypadActionType::SetSourceVisibility);
+					  binding_.action == JoypadActionType::SetSourceVisibility ||
+					  binding_.action == JoypadActionType::SourceTransform);
 		bool needs_source = (binding_.action == JoypadActionType::ToggleSourceVisibility) ||
 				    (binding_.action == JoypadActionType::SetSourceVisibility) ||
 				    (binding_.action == JoypadActionType::ToggleSourceMute) ||
@@ -1793,7 +1897,8 @@ private:
 				    (binding_.action == JoypadActionType::ToggleFilterEnabled) ||
 				    (binding_.action == JoypadActionType::SetFilterEnabled) ||
 				    (binding_.action == JoypadActionType::SetFilterProperty) ||
-				    (binding_.action == JoypadActionType::AdjustFilterProperty);
+				    (binding_.action == JoypadActionType::AdjustFilterProperty) ||
+				    (binding_.action == JoypadActionType::SourceTransform);
 		bool needs_filter = (binding_.action == JoypadActionType::ToggleFilterEnabled ||
 				     binding_.action == JoypadActionType::SetFilterEnabled ||
 				     binding_.action == JoypadActionType::SetFilterProperty ||
@@ -1837,6 +1942,9 @@ private:
 			binding_.filter_property_list_string.clear();
 			binding_.filter_property_list_int = 0;
 			binding_.filter_property_list_float = 0.0;
+		}
+		if (binding_.action != JoypadActionType::SourceTransform) {
+			binding_.source_transform_op = JoypadSourceTransformOp::CenterToScreen;
 		}
 		if (!needs_bool)
 			binding_.bool_value = false;
@@ -1883,6 +1991,8 @@ private:
 	QComboBox *filter_combo_ = nullptr;
 	QLabel *filter_property_label_ = nullptr;
 	QComboBox *filter_property_combo_ = nullptr;
+	QLabel *transform_op_label_ = nullptr;
+	QComboBox *transform_op_combo_ = nullptr;
 
 	QComboBox *action_combo_ = nullptr;
 	QCheckBox *bool_checkbox_ = nullptr;
@@ -2592,6 +2702,11 @@ void JoypadToolsDialog::RefreshBindings()
 			if (!binding.filter_property_name.empty()) {
 				source_filter_text += " :: " + QString::fromStdString(binding.filter_property_name);
 			}
+			break;
+		case JoypadActionType::SourceTransform:
+			scene_text = binding.use_current_scene ? L("JoypadToOBS.Common.Current")
+							       : QString::fromStdString(binding.scene_name);
+			source_filter_text = QString::fromStdString(binding.source_name);
 			break;
 		default:
 			break;

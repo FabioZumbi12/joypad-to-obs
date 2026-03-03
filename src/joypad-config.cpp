@@ -181,6 +181,7 @@ static void load_binding_from_data(JoypadBinding &binding, obs_data_t *data)
 	binding.filter_property_list_string = obs_data_get_string(data, "filter_property_list_string");
 	binding.filter_property_list_int = obs_data_get_int(data, "filter_property_list_int");
 	binding.filter_property_list_float = obs_data_get_double(data, "filter_property_list_float");
+	binding.source_transform_op = (JoypadSourceTransformOp)obs_data_get_int(data, "source_transform_op");
 	binding.bool_value = obs_data_get_bool(data, "bool_value");
 	binding.allow_above_unity = obs_data_get_bool(data, "allow_above_unity");
 	if (!binding.allow_above_unity) {
@@ -295,6 +296,14 @@ static void save_binding_to_data(const JoypadBinding &binding, obs_data_t *data)
 		obs_data_set_double(data, "filter_property_min", binding.filter_property_min);
 		obs_data_set_double(data, "filter_property_max", binding.filter_property_max);
 		obs_data_set_double(data, "volume_value", binding.volume_value);
+		break;
+	case JoypadActionType::SourceTransform:
+		obs_data_set_bool(data, "use_current_scene", binding.use_current_scene);
+		if (!binding.use_current_scene) {
+			obs_data_set_string(data, "scene_name", binding.scene_name.c_str());
+		}
+		obs_data_set_string(data, "source_name", binding.source_name.c_str());
+		obs_data_set_int(data, "source_transform_op", (int)binding.source_transform_op);
 		break;
 	default:
 		break;
