@@ -19,6 +19,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include "joypad-config.h"
 
 #include <obs-module.h>
+#include <obs-properties.h>
 #include <cmath>
 #include <algorithm>
 #include <plugin-support.h>
@@ -167,6 +168,19 @@ static void load_binding_from_data(JoypadBinding &binding, obs_data_t *data)
 	binding.scene_name = obs_data_get_string(data, "scene_name");
 	binding.source_name = obs_data_get_string(data, "source_name");
 	binding.filter_name = obs_data_get_string(data, "filter_name");
+	binding.filter_property_name = obs_data_get_string(data, "filter_property_name");
+	binding.filter_property_type = (int)obs_data_get_int(data, "filter_property_type");
+	binding.filter_property_value = obs_data_get_double(data, "filter_property_value");
+	binding.filter_property_min = obs_data_get_double(data, "filter_property_min");
+	binding.filter_property_max = obs_data_get_double(data, "filter_property_max");
+	if (binding.filter_property_max <= binding.filter_property_min) {
+		binding.filter_property_min = 0.0;
+		binding.filter_property_max = 1.0;
+	}
+	binding.filter_property_list_format = (int)obs_data_get_int(data, "filter_property_list_format");
+	binding.filter_property_list_string = obs_data_get_string(data, "filter_property_list_string");
+	binding.filter_property_list_int = obs_data_get_int(data, "filter_property_list_int");
+	binding.filter_property_list_float = obs_data_get_double(data, "filter_property_list_float");
 	binding.bool_value = obs_data_get_bool(data, "bool_value");
 	binding.allow_above_unity = obs_data_get_bool(data, "allow_above_unity");
 	if (!binding.allow_above_unity) {
@@ -258,6 +272,29 @@ static void save_binding_to_data(const JoypadBinding &binding, obs_data_t *data)
 		if (binding.action == JoypadActionType::SetFilterEnabled) {
 			obs_data_set_bool(data, "bool_value", binding.bool_value);
 		}
+		break;
+	case JoypadActionType::SetFilterProperty:
+		obs_data_set_string(data, "source_name", binding.source_name.c_str());
+		obs_data_set_string(data, "filter_name", binding.filter_name.c_str());
+		obs_data_set_string(data, "filter_property_name", binding.filter_property_name.c_str());
+		obs_data_set_int(data, "filter_property_type", binding.filter_property_type);
+		obs_data_set_double(data, "filter_property_value", binding.filter_property_value);
+		obs_data_set_double(data, "filter_property_min", binding.filter_property_min);
+		obs_data_set_double(data, "filter_property_max", binding.filter_property_max);
+		obs_data_set_int(data, "filter_property_list_format", binding.filter_property_list_format);
+		obs_data_set_string(data, "filter_property_list_string", binding.filter_property_list_string.c_str());
+		obs_data_set_int(data, "filter_property_list_int", binding.filter_property_list_int);
+		obs_data_set_double(data, "filter_property_list_float", binding.filter_property_list_float);
+		obs_data_set_bool(data, "bool_value", binding.bool_value);
+		break;
+	case JoypadActionType::AdjustFilterProperty:
+		obs_data_set_string(data, "source_name", binding.source_name.c_str());
+		obs_data_set_string(data, "filter_name", binding.filter_name.c_str());
+		obs_data_set_string(data, "filter_property_name", binding.filter_property_name.c_str());
+		obs_data_set_int(data, "filter_property_type", binding.filter_property_type);
+		obs_data_set_double(data, "filter_property_min", binding.filter_property_min);
+		obs_data_set_double(data, "filter_property_max", binding.filter_property_max);
+		obs_data_set_double(data, "volume_value", binding.volume_value);
 		break;
 	default:
 		break;
@@ -885,6 +922,9 @@ std::vector<JoypadBinding> JoypadConfigStore::FindMatchingBindings(const JoypadE
 				continue;
 			}
 			const bool is_percent_axis = (binding.action == JoypadActionType::SetSourceVolumePercent);
+			const bool is_filter_numeric_axis = (binding.action == JoypadActionType::SetFilterProperty) &&
+							    (binding.filter_property_type == OBS_PROPERTY_INT ||
+							     binding.filter_property_type == OBS_PROPERTY_FLOAT);
 			if (binding.action == JoypadActionType::SetSourceVolumePercent) {
 				// Map axis min..max to 0..100%
 				double minv = binding.axis_min_value;
@@ -910,13 +950,33 @@ std::vector<JoypadBinding> JoypadConfigStore::FindMatchingBindings(const JoypadE
 				gamma = std::clamp(gamma, 0.1, 50.0);
 				double curved = std::pow(base, gamma);
 				binding.volume_value = std::clamp(curved * 100.0, 0.0, 100.0);
+			} else if (is_filter_numeric_axis) {
+				double minv = binding.axis_min_value;
+				double maxv = binding.axis_max_value;
+				if (maxv <= minv) {
+					minv = 0.0;
+					maxv = 1024.0;
+				}
+				double normalized = (event.axis_raw_value - minv) / (maxv - minv);
+				normalized = std::clamp(normalized, 0.0, 1.0);
+				if (binding.axis_inverted || binding.axis_direction == JoypadAxisDirection::Negative) {
+					normalized = 1.0 - normalized;
+				}
+				double target_min = binding.filter_property_min;
+				double target_max = binding.filter_property_max;
+				if (target_max <= target_min) {
+					target_min = 0.0;
+					target_max = 1.0;
+				}
+				binding.filter_property_value = target_min + normalized * (target_max - target_min);
 			}
 			double value = event.axis_value;
 			if (binding.axis_inverted) {
 				value = -value;
 			}
 			const double abs_value = std::fabs(value);
-			if (!is_percent_axis && binding.axis_direction != JoypadAxisDirection::Both) {
+			if (!is_percent_axis && !is_filter_numeric_axis &&
+			    binding.axis_direction != JoypadAxisDirection::Both) {
 				int dir = value >= 0.0 ? 1 : -1;
 				if (dir != (int)binding.axis_direction) {
 					continue;
@@ -928,7 +988,7 @@ std::vector<JoypadBinding> JoypadConfigStore::FindMatchingBindings(const JoypadE
 			std::string axis_key = event.device_id + ":" + std::to_string(binding.axis_index) + ":" +
 					       std::to_string((int)binding.axis_direction) + ":" +
 					       (binding.axis_inverted ? "1" : "0");
-			if (!is_percent_axis) {
+			if (!is_percent_axis && !is_filter_numeric_axis) {
 				bool active = axis_active_[axis_key];
 				if (!active) {
 					if (abs_value < threshold_on) {
@@ -942,12 +1002,13 @@ std::vector<JoypadBinding> JoypadConfigStore::FindMatchingBindings(const JoypadE
 					}
 				}
 			}
-			if (binding.action == JoypadActionType::AdjustSourceVolume) {
+			if (binding.action == JoypadActionType::AdjustSourceVolume ||
+			    binding.action == JoypadActionType::AdjustFilterProperty) {
 				double sign = value >= 0.0 ? 1.0 : -1.0;
 				binding.volume_value = std::fabs(binding.volume_value) * sign;
 			}
 			const bool is_continuous_axis_action =
-				(binding.action == JoypadActionType::SetSourceVolumePercent);
+				(binding.action == JoypadActionType::SetSourceVolumePercent) || is_filter_numeric_axis;
 			if (!is_continuous_axis_action) {
 				const double min_rate = std::clamp(binding.axis_min_per_second, 1.0, 60.0);
 				const double max_rate = std::clamp(binding.axis_max_per_second, min_rate, 60.0);

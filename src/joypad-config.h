@@ -48,6 +48,8 @@ enum class JoypadActionType {
 	ToggleVirtualCam = 17,
 	ToggleStudioMode = 18,
 	TransitionToProgram = 19,
+	SetFilterProperty = 20,
+	AdjustFilterProperty = 21,
 };
 
 enum class JoypadInputType {
@@ -98,6 +100,15 @@ struct JoypadBinding {
 
 	std::string source_name;
 	std::string filter_name;
+	std::string filter_property_name;
+	int filter_property_type = 0;
+	double filter_property_value = 0.0;
+	double filter_property_min = 0.0;
+	double filter_property_max = 1.0;
+	int filter_property_list_format = 0;
+	std::string filter_property_list_string;
+	long long filter_property_list_int = 0;
+	double filter_property_list_float = 0.0;
 
 	bool bool_value = false;
 	bool allow_above_unity = false;

@@ -21,6 +21,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 
 #include <obs-frontend-api.h>
 #include <obs-module.h>
+#include <obs-properties.h>
 
 #include <QAbstractItemView>
 #include <QCheckBox>
@@ -45,6 +46,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <QTableWidgetItem>
 #include <QSlider>
 #include <QSizePolicy>
+#include <QSignalBlocker>
 #include <QTimer>
 #include <QStyle>
 #include <QFileInfo>
@@ -179,6 +181,10 @@ QString action_to_text(JoypadActionType action)
 		return L("JoypadToOBS.Action.ToggleStudioMode");
 	case JoypadActionType::TransitionToProgram:
 		return L("JoypadToOBS.Action.TransitionToProgram");
+	case JoypadActionType::SetFilterProperty:
+		return L("JoypadToOBS.Action.SetFilterProperty");
+	case JoypadActionType::AdjustFilterProperty:
+		return L("JoypadToOBS.Action.AdjustFilterProperty");
 	default:
 		return L("JoypadToOBS.Common.Unknown");
 	}
@@ -201,6 +207,33 @@ QString binding_details(const JoypadBinding &binding)
 		return QString::number(binding.slider_gamma, 'f', 2) + " " + L("JoypadToOBS.Common.MultiplierSuffix");
 	case JoypadActionType::SetFilterEnabled:
 		return binding.bool_value ? L("JoypadToOBS.Common.On") : L("JoypadToOBS.Common.Off");
+	case JoypadActionType::SetFilterProperty:
+		if (binding.filter_property_type == OBS_PROPERTY_BOOL) {
+			return binding.bool_value ? L("JoypadToOBS.Common.On") : L("JoypadToOBS.Common.Off");
+		}
+		if (binding.filter_property_type == OBS_PROPERTY_INT) {
+			return QString::number((int)std::llround(binding.filter_property_value));
+		}
+		if (binding.filter_property_type == OBS_PROPERTY_FLOAT) {
+			return QString::number(binding.filter_property_value, 'f', 3);
+		}
+		if (binding.filter_property_type == OBS_PROPERTY_LIST) {
+			if (!binding.filter_property_list_string.empty()) {
+				return QString::fromStdString(binding.filter_property_list_string);
+			}
+			if (binding.filter_property_list_format == OBS_COMBO_FORMAT_INT) {
+				return QString::number(binding.filter_property_list_int);
+			}
+			if (binding.filter_property_list_format == OBS_COMBO_FORMAT_FLOAT) {
+				return QString::number(binding.filter_property_list_float, 'f', 3);
+			}
+		}
+		return QString::fromStdString(binding.filter_property_name);
+	case JoypadActionType::AdjustFilterProperty:
+		if (binding.volume_value >= 0.0) {
+			return L("JoypadToOBS.Common.PositiveValue").arg(binding.volume_value, 0, 'f', 3);
+		}
+		return QString::number(binding.volume_value, 'f', 3);
 	default:
 		return QString();
 	}
@@ -336,6 +369,96 @@ std::vector<std::string> get_filter_names_for_source(const std::string &source_n
 	return names;
 }
 
+struct FilterPropertyListItem {
+	std::string name;
+	std::string string_value;
+	long long int_value = 0;
+	double float_value = 0.0;
+};
+
+struct FilterPropertyInfo {
+	std::string name;
+	std::string description;
+	obs_property_type type = OBS_PROPERTY_INVALID;
+	double min_value = 0.0;
+	double max_value = 1.0;
+	obs_combo_format list_format = OBS_COMBO_FORMAT_INVALID;
+	std::vector<FilterPropertyListItem> list_items;
+};
+
+std::vector<FilterPropertyInfo> get_filter_properties_for_source_filter(const std::string &source_name,
+									const std::string &filter_name)
+{
+	std::vector<FilterPropertyInfo> infos;
+	if (source_name.empty() || filter_name.empty()) {
+		return infos;
+	}
+
+	obs_source_t *source = obs_get_source_by_name(source_name.c_str());
+	if (!source) {
+		return infos;
+	}
+	obs_source_t *filter = obs_source_get_filter_by_name(source, filter_name.c_str());
+	obs_source_release(source);
+	if (!filter) {
+		return infos;
+	}
+
+	obs_properties_t *props = obs_source_properties(filter);
+	obs_source_release(filter);
+	if (!props) {
+		return infos;
+	}
+
+	for (obs_property_t *prop = obs_properties_first(props); prop; obs_property_next(&prop)) {
+		const obs_property_type type = obs_property_get_type(prop);
+		if (type != OBS_PROPERTY_BOOL && type != OBS_PROPERTY_INT && type != OBS_PROPERTY_FLOAT &&
+		    type != OBS_PROPERTY_LIST) {
+			continue;
+		}
+
+		FilterPropertyInfo info;
+		const char *name = obs_property_name(prop);
+		const char *desc = obs_property_description(prop);
+		if (!name || !*name) {
+			continue;
+		}
+		info.name = name;
+		info.description = (desc && *desc) ? desc : name;
+		info.type = type;
+
+		if (type == OBS_PROPERTY_INT) {
+			info.min_value = (double)obs_property_int_min(prop);
+			info.max_value = (double)obs_property_int_max(prop);
+		} else if (type == OBS_PROPERTY_FLOAT) {
+			info.min_value = obs_property_float_min(prop);
+			info.max_value = obs_property_float_max(prop);
+		} else if (type == OBS_PROPERTY_LIST) {
+			info.list_format = obs_property_list_format(prop);
+			const size_t count = obs_property_list_item_count(prop);
+			for (size_t i = 0; i < count; ++i) {
+				FilterPropertyListItem item;
+				const char *item_name = obs_property_list_item_name(prop, i);
+				item.name = (item_name && *item_name) ? item_name : "";
+				if (info.list_format == OBS_COMBO_FORMAT_INT) {
+					item.int_value = obs_property_list_item_int(prop, i);
+				} else if (info.list_format == OBS_COMBO_FORMAT_FLOAT) {
+					item.float_value = obs_property_list_item_float(prop, i);
+				} else {
+					const char *item_value = obs_property_list_item_string(prop, i);
+					item.string_value = (item_value && *item_value) ? item_value : "";
+				}
+				info.list_items.push_back(item);
+			}
+		}
+
+		infos.push_back(std::move(info));
+	}
+
+	obs_properties_destroy(props);
+	return infos;
+}
+
 QString input_label_from_event(const JoypadEvent &event)
 {
 	if (event.is_axis) {
@@ -379,6 +502,22 @@ double map_axis_raw_to_percent_for_test(const JoypadBinding &binding, double raw
 	return std::clamp(curved * 100.0, 0.0, 100.0);
 }
 
+double map_axis_raw_to_range_for_test(const JoypadBinding &binding, double raw, double target_min, double target_max)
+{
+	double minv = binding.axis_min_value;
+	double maxv = binding.axis_max_value;
+	if (maxv <= minv) {
+		minv = 0.0;
+		maxv = 1024.0;
+	}
+	double normalized = (raw - minv) / (maxv - minv);
+	normalized = std::clamp(normalized, 0.0, 1.0);
+	if (binding.axis_inverted || binding.axis_direction == JoypadAxisDirection::Negative) {
+		normalized = 1.0 - normalized;
+	}
+	return target_min + normalized * (target_max - target_min);
+}
+
 class JoypadBindingDialog : public QDialog {
 public:
 	JoypadBindingDialog(QWidget *parent, JoypadConfigStore *config, JoypadInputManager *input,
@@ -393,6 +532,7 @@ public:
 		setModal(true);
 
 		auto *layout = new QVBoxLayout(this);
+		layout->setSizeConstraint(QLayout::SetFixedSize);
 
 		auto *description = new QLabel(L("JoypadToOBS.Dialog.AddDescription"), this);
 		description->setWordWrap(true);
@@ -473,6 +613,7 @@ public:
 		scene_combo_ = new QComboBox(target_group);
 		source_combo_ = new QComboBox(target_group);
 		filter_combo_ = new QComboBox(target_group);
+		filter_property_combo_ = new QComboBox(target_group);
 
 		target_layout->addWidget(use_current_scene_, 0, 0, 1, 2);
 		target_layout->addWidget(new QLabel(L("JoypadToOBS.Field.Scene")), 1, 0);
@@ -481,6 +622,9 @@ public:
 		target_layout->addWidget(source_combo_, 2, 1);
 		target_layout->addWidget(new QLabel(L("JoypadToOBS.Field.Filter")), 3, 0);
 		target_layout->addWidget(filter_combo_, 3, 1);
+		filter_property_label_ = new QLabel(L("JoypadToOBS.Field.FilterProperty"), target_group);
+		target_layout->addWidget(filter_property_label_, 4, 0);
+		target_layout->addWidget(filter_property_combo_, 4, 1);
 
 		auto *action_group = new QGroupBox(L("JoypadToOBS.Group.Action"));
 		auto *action_layout = new QGridLayout(action_group);
@@ -514,6 +658,10 @@ public:
 				       (int)JoypadActionType::ToggleFilterEnabled);
 		action_combo_->addItem(action_to_text(JoypadActionType::SetFilterEnabled),
 				       (int)JoypadActionType::SetFilterEnabled);
+		action_combo_->addItem(action_to_text(JoypadActionType::SetFilterProperty),
+				       (int)JoypadActionType::SetFilterProperty);
+		action_combo_->addItem(action_to_text(JoypadActionType::AdjustFilterProperty),
+				       (int)JoypadActionType::AdjustFilterProperty);
 		action_combo_->addItem(action_to_text(JoypadActionType::ToggleStreaming),
 				       (int)JoypadActionType::ToggleStreaming);
 		action_combo_->addItem(action_to_text(JoypadActionType::ToggleRecording),
@@ -527,6 +675,8 @@ public:
 
 		bool_checkbox_ = new QCheckBox(L("JoypadToOBS.Common.Enable"), action_group);
 		volume_spin_ = new QDoubleSpinBox(action_group);
+		filter_property_list_label_ = new QLabel(L("JoypadToOBS.Field.PropertyValue"), action_group);
+		filter_property_list_combo_ = new QComboBox(action_group);
 		volume_allow_above_unity_ = new QCheckBox(L("JoypadToOBS.Field.AllowAboveDb"), action_group);
 		invert_axis_checkbox_ = new QCheckBox(L("JoypadToOBS.Field.InvertAxis"), action_group);
 		test_mode_checkbox_ = new QCheckBox(L("JoypadToOBS.Field.TestMode"), action_group);
@@ -541,9 +691,11 @@ public:
 		volume_label_ = new QLabel(L("JoypadToOBS.Field.Volume"), action_group);
 		action_layout->addWidget(volume_label_, 2, 0);
 		action_layout->addWidget(volume_spin_, 2, 1);
-		action_layout->addWidget(volume_allow_above_unity_, 3, 0, 1, 2);
-		action_layout->addWidget(invert_axis_checkbox_, 4, 0, 1, 2);
-		action_layout->addWidget(test_mode_checkbox_, 5, 0, 1, 2);
+		action_layout->addWidget(filter_property_list_label_, 3, 0);
+		action_layout->addWidget(filter_property_list_combo_, 3, 1);
+		action_layout->addWidget(volume_allow_above_unity_, 4, 0, 1, 2);
+		action_layout->addWidget(invert_axis_checkbox_, 5, 0, 1, 2);
+		action_layout->addWidget(test_mode_checkbox_, 6, 0, 1, 2);
 
 		layout->addWidget(action_group);
 		layout->addWidget(target_group);
@@ -565,6 +717,12 @@ public:
 		connect(source_combo_, &QComboBox::currentIndexChanged, this,
 			[this](int) { DisableTestModeOnConfigChange(); });
 		connect(filter_combo_, &QComboBox::currentIndexChanged, this,
+			[this](int) { DisableTestModeOnConfigChange(); });
+		connect(filter_property_combo_, &QComboBox::currentIndexChanged, this,
+			[this](int) { DisableTestModeOnConfigChange(); });
+		connect(filter_property_combo_, &QComboBox::currentIndexChanged, this,
+			[this](int) { UpdateActionUi(); });
+		connect(filter_property_list_combo_, &QComboBox::currentIndexChanged, this,
 			[this](int) { DisableTestModeOnConfigChange(); });
 		connect(bool_checkbox_, &QCheckBox::toggled, this, [this](bool) { DisableTestModeOnConfigChange(); });
 		connect(use_current_scene_, &QCheckBox::toggled, this,
@@ -611,6 +769,8 @@ public:
 			DisableTestModeOnConfigChange();
 		});
 		connect(source_combo_, &QComboBox::currentIndexChanged, this, &JoypadBindingDialog::ReloadFilters);
+		connect(filter_combo_, &QComboBox::currentIndexChanged, this,
+			[this](int) { ReloadFilterProperties(); });
 		connect(axis_set_min_button_, &QPushButton::clicked, this, [this]() {
 			binding_.axis_min_value = last_axis_value_;
 			axis_min_label_->setText(L("JoypadToOBS.Field.AxisMinValue") + ": " +
@@ -658,6 +818,22 @@ public:
 									.arg(percent, 0, 'f', 0) +
 								" " +
 								L("JoypadToOBS.Common.DbValue").arg(db, 0, 'f', 1));
+						} else if (CurrentAction() == JoypadActionType::SetFilterProperty) {
+							const FilterPropertyInfo *info = CurrentFilterPropertyInfo();
+							if (info && (info->type == OBS_PROPERTY_INT ||
+								     info->type == OBS_PROPERTY_FLOAT)) {
+								double mapped = map_axis_raw_to_range_for_test(
+									binding_, event.axis_raw_value, info->min_value,
+									info->max_value);
+								axis_value_slider_->setValue((int)event.axis_raw_value);
+								axis_live_value_label_->setText(QString::number(
+									mapped, 'f',
+									info->type == OBS_PROPERTY_INT ? 0 : 3));
+							} else {
+								axis_value_slider_->setValue((int)event.axis_raw_value);
+								axis_live_value_label_->setText(
+									QString::number(last_axis_value_, 'f', 2));
+							}
 						} else {
 							axis_value_slider_->setValue((int)event.axis_raw_value);
 							axis_live_value_label_->setText(
@@ -744,6 +920,17 @@ private:
 		if (test.action == JoypadActionType::SetSourceVolumePercent) {
 			double percent = learned_event_.is_axis ? MapRawToPercent(last_axis_value_) : 50.0;
 			test.volume_value = std::clamp(percent, 0.0, 100.0);
+		} else if (test.action == JoypadActionType::SetFilterProperty &&
+			   (test.filter_property_type == OBS_PROPERTY_INT ||
+			    test.filter_property_type == OBS_PROPERTY_FLOAT)) {
+			double target_min = test.filter_property_min;
+			double target_max = test.filter_property_max;
+			if (target_max <= target_min) {
+				target_min = 0.0;
+				target_max = 1.0;
+			}
+			test.filter_property_value =
+				map_axis_raw_to_range_for_test(test, last_axis_value_, target_min, target_max);
 		}
 		std::lock_guard<std::mutex> lock(g_dialog_test_mutex);
 		g_dialog_test_state.enabled = true;
@@ -814,6 +1001,12 @@ private:
 	void UpdateAxisUi(bool visible)
 	{
 		bool hide_axis_options = (CurrentAction() == JoypadActionType::SetSourceVolumePercent);
+		if (CurrentAction() == JoypadActionType::SetFilterProperty) {
+			const FilterPropertyInfo *info = CurrentFilterPropertyInfo();
+			if (info && (info->type == OBS_PROPERTY_INT || info->type == OBS_PROPERTY_FLOAT)) {
+				hide_axis_options = true;
+			}
+		}
 		if (hide_axis_options) {
 			axis_value_slider_->setRange(0, 100);
 		} else {
@@ -840,6 +1033,10 @@ private:
 		axis_max_label_->setVisible(visible && hide_axis_options);
 		axis_set_min_button_->setVisible(visible && hide_axis_options);
 		axis_set_max_button_->setVisible(visible && hide_axis_options);
+		if (QLayout *lyt = layout()) {
+			lyt->activate();
+		}
+		adjustSize();
 	}
 
 	void ApplyBinding(const JoypadBinding &binding)
@@ -921,11 +1118,23 @@ private:
 
 		ReloadFilters();
 		filter_combo_->setCurrentText(QString::fromStdString(binding.filter_name));
+		ReloadFilterProperties();
+		if (!binding.filter_property_name.empty()) {
+			int property_idx =
+				filter_property_combo_->findData(QString::fromStdString(binding.filter_property_name));
+			if (property_idx >= 0) {
+				filter_property_combo_->setCurrentIndex(property_idx);
+			}
+		}
 
 		bool_checkbox_->setChecked(binding.bool_value);
 		volume_allow_above_unity_->setChecked(binding.allow_above_unity);
 		if (binding.action == JoypadActionType::SetSourceVolumePercent) {
 			volume_spin_->setValue(binding.slider_gamma);
+		} else if (binding.action == JoypadActionType::SetFilterProperty) {
+			volume_spin_->setValue(binding.filter_property_value);
+		} else if (binding.action == JoypadActionType::AdjustFilterProperty) {
+			volume_spin_->setValue(binding.volume_value);
 		} else {
 			volume_spin_->setValue(binding.volume_value);
 		}
@@ -945,6 +1154,7 @@ private:
 	void ReloadSourcesForAction(JoypadActionType action)
 	{
 		auto previous = source_combo_->currentData().toString();
+		QSignalBlocker blocker(*source_combo_);
 		source_combo_->clear();
 
 		auto sources = get_sources_for_action(action);
@@ -960,15 +1170,143 @@ private:
 
 	void ReloadFilters()
 	{
+		auto previous = filter_combo_->currentText();
+		QSignalBlocker blocker(*filter_combo_);
 		filter_combo_->clear();
 		auto names = get_filter_names_for_source(source_combo_->currentData().toString().toStdString());
 		for (const auto &name : names) {
 			filter_combo_->addItem(QString::fromStdString(name));
 		}
+		int idx = filter_combo_->findText(previous);
+		if (idx >= 0) {
+			filter_combo_->setCurrentIndex(idx);
+		}
+		ReloadFilterProperties();
+	}
+
+	const FilterPropertyInfo *CurrentFilterPropertyInfo() const
+	{
+		const QString selected = filter_property_combo_->currentData().toString();
+		if (selected.isEmpty()) {
+			return nullptr;
+		}
+		for (const auto &info : filter_properties_) {
+			if (QString::fromStdString(info.name) == selected) {
+				return &info;
+			}
+		}
+		return nullptr;
+	}
+
+	bool ReadCurrentFilterPropertyValue(const FilterPropertyInfo &info, bool &bool_value_out,
+					    double &number_value_out, int &list_index_out) const
+	{
+		bool_value_out = false;
+		number_value_out = 0.0;
+		list_index_out = 0;
+
+		const std::string source_name = source_combo_->currentData().toString().toStdString();
+		const std::string filter_name = filter_combo_->currentText().toStdString();
+		if (source_name.empty() || filter_name.empty() || info.name.empty()) {
+			return false;
+		}
+
+		obs_source_t *source = obs_get_source_by_name(source_name.c_str());
+		if (!source) {
+			return false;
+		}
+		obs_source_t *filter = obs_source_get_filter_by_name(source, filter_name.c_str());
+		obs_source_release(source);
+		if (!filter) {
+			return false;
+		}
+		obs_data_t *settings = obs_source_get_settings(filter);
+		obs_source_release(filter);
+		if (!settings) {
+			return false;
+		}
+
+		if (info.type == OBS_PROPERTY_BOOL) {
+			bool_value_out = obs_data_get_bool(settings, info.name.c_str());
+		} else if (info.type == OBS_PROPERTY_INT) {
+			number_value_out = (double)obs_data_get_int(settings, info.name.c_str());
+		} else if (info.type == OBS_PROPERTY_FLOAT) {
+			number_value_out = obs_data_get_double(settings, info.name.c_str());
+		} else if (info.type == OBS_PROPERTY_LIST) {
+			if (info.list_format == OBS_COMBO_FORMAT_INT) {
+				long long current = obs_data_get_int(settings, info.name.c_str());
+				for (size_t i = 0; i < info.list_items.size(); ++i) {
+					if (info.list_items[i].int_value == current) {
+						list_index_out = (int)i;
+						break;
+					}
+				}
+			} else if (info.list_format == OBS_COMBO_FORMAT_FLOAT) {
+				double current = obs_data_get_double(settings, info.name.c_str());
+				for (size_t i = 0; i < info.list_items.size(); ++i) {
+					if (std::fabs(info.list_items[i].float_value - current) < 0.000001) {
+						list_index_out = (int)i;
+						break;
+					}
+				}
+			} else {
+				const char *current = obs_data_get_string(settings, info.name.c_str());
+				const std::string current_str = current ? current : "";
+				for (size_t i = 0; i < info.list_items.size(); ++i) {
+					if (info.list_items[i].string_value == current_str) {
+						list_index_out = (int)i;
+						break;
+					}
+				}
+			}
+		}
+
+		obs_data_release(settings);
+		return true;
+	}
+
+	void ReloadFilterProperties()
+	{
+		const QString previous = filter_property_combo_->currentData().toString();
+		QSignalBlocker property_blocker(*filter_property_combo_);
+		QSignalBlocker list_blocker(*filter_property_list_combo_);
+		filter_property_combo_->clear();
+		filter_property_list_combo_->clear();
+		filter_properties_.clear();
+
+		if (CurrentAction() != JoypadActionType::SetFilterProperty &&
+		    CurrentAction() != JoypadActionType::AdjustFilterProperty) {
+			return;
+		}
+
+		filter_properties_ =
+			get_filter_properties_for_source_filter(source_combo_->currentData().toString().toStdString(),
+								filter_combo_->currentText().toStdString());
+		for (const auto &info : filter_properties_) {
+			if (CurrentAction() == JoypadActionType::AdjustFilterProperty &&
+			    !(info.type == OBS_PROPERTY_INT || info.type == OBS_PROPERTY_FLOAT)) {
+				continue;
+			}
+			const QString label = QString::fromStdString(info.description);
+			filter_property_combo_->addItem(label, QString::fromStdString(info.name));
+		}
+		int idx = filter_property_combo_->findData(previous);
+		if (idx < 0 && !binding_.filter_property_name.empty()) {
+			idx = filter_property_combo_->findData(QString::fromStdString(binding_.filter_property_name));
+		}
+		if (idx >= 0) {
+			filter_property_combo_->setCurrentIndex(idx);
+		} else if (filter_property_combo_->count() > 0) {
+			filter_property_combo_->setCurrentIndex(0);
+		}
 	}
 
 	void UpdateActionUi()
 	{
+		if (updating_action_ui_) {
+			return;
+		}
+		updating_action_ui_ = true;
 		auto action = CurrentAction();
 		bool needs_scene = (action == JoypadActionType::SwitchScene) ||
 				   (action == JoypadActionType::ToggleSourceVisibility) ||
@@ -982,9 +1320,15 @@ private:
 			(action == JoypadActionType::SetSourceVolumePercent) ||
 			(action == JoypadActionType::MediaPlayPause) || (action == JoypadActionType::MediaRestart) ||
 			(action == JoypadActionType::MediaStop) || (action == JoypadActionType::ToggleFilterEnabled) ||
-			(action == JoypadActionType::SetFilterEnabled);
+			(action == JoypadActionType::SetFilterEnabled) ||
+			(action == JoypadActionType::SetFilterProperty) ||
+			(action == JoypadActionType::AdjustFilterProperty);
 		bool needs_filter = (action == JoypadActionType::ToggleFilterEnabled) ||
-				    (action == JoypadActionType::SetFilterEnabled);
+				    (action == JoypadActionType::SetFilterEnabled) ||
+				    (action == JoypadActionType::SetFilterProperty) ||
+				    (action == JoypadActionType::AdjustFilterProperty);
+		bool needs_filter_property = (action == JoypadActionType::SetFilterProperty) ||
+					     (action == JoypadActionType::AdjustFilterProperty);
 
 		scene_combo_->setEnabled(needs_scene);
 		use_current_scene_->setEnabled(needs_scene && action != JoypadActionType::SwitchScene);
@@ -993,9 +1337,15 @@ private:
 		}
 		source_combo_->setEnabled(needs_source);
 		filter_combo_->setEnabled(needs_filter);
+		filter_property_label_->setVisible(needs_filter_property);
+		filter_property_combo_->setVisible(needs_filter_property);
+		filter_property_combo_->setEnabled(needs_filter_property);
 
 		ReloadSourcesForAction(action);
 		ReloadFilters();
+		if (needs_filter_property) {
+			ReloadFilterProperties();
+		}
 
 		bool show_bool = (action == JoypadActionType::SetSourceVisibility) ||
 				 (action == JoypadActionType::SetSourceMute) ||
@@ -1003,12 +1353,82 @@ private:
 		bool show_volume = (action == JoypadActionType::SetSourceVolume) ||
 				   (action == JoypadActionType::AdjustSourceVolume) ||
 				   (action == JoypadActionType::SetSourceVolumePercent);
+		bool show_property_list = false;
 		bool show_above_unity = (action == JoypadActionType::SetSourceVolume) ||
 					(action == JoypadActionType::AdjustSourceVolume);
+
+		if (action == JoypadActionType::SetFilterProperty || action == JoypadActionType::AdjustFilterProperty) {
+			const FilterPropertyInfo *info = CurrentFilterPropertyInfo();
+			if (info) {
+				bool current_bool = false;
+				double current_number = 0.0;
+				int current_list_index = 0;
+				const bool has_current_value = ReadCurrentFilterPropertyValue(
+					*info, current_bool, current_number, current_list_index);
+				if (info->type == OBS_PROPERTY_BOOL) {
+					show_bool = show_bool || (action == JoypadActionType::SetFilterProperty);
+					if (action == JoypadActionType::SetFilterProperty) {
+						if (existing_ && binding_.filter_property_name == info->name) {
+							bool_checkbox_->setChecked(binding_.bool_value);
+						} else if (has_current_value) {
+							bool_checkbox_->setChecked(current_bool);
+						}
+					}
+				} else if (info->type == OBS_PROPERTY_INT || info->type == OBS_PROPERTY_FLOAT) {
+					show_volume = true;
+				} else if (info->type == OBS_PROPERTY_LIST &&
+					   action == JoypadActionType::SetFilterProperty) {
+					show_property_list = true;
+					filter_property_list_combo_->clear();
+					for (size_t i = 0; i < info->list_items.size(); ++i) {
+						const auto &item = info->list_items[i];
+						QString text = QString::fromStdString(item.name);
+						if (text.isEmpty()) {
+							if (info->list_format == OBS_COMBO_FORMAT_INT) {
+								text = QString::number(item.int_value);
+							} else if (info->list_format == OBS_COMBO_FORMAT_FLOAT) {
+								text = QString::number(item.float_value, 'f', 3);
+							} else {
+								text = QString::fromStdString(item.string_value);
+							}
+						}
+						filter_property_list_combo_->addItem(text, (int)i);
+					}
+					if (existing_ && !binding_.filter_property_name.empty() &&
+					    binding_.filter_property_name == info->name) {
+						int select_idx = 0;
+						for (size_t i = 0; i < info->list_items.size(); ++i) {
+							const auto &item = info->list_items[i];
+							if (info->list_format == OBS_COMBO_FORMAT_INT &&
+							    item.int_value == binding_.filter_property_list_int) {
+								select_idx = (int)i;
+								break;
+							}
+							if (info->list_format == OBS_COMBO_FORMAT_FLOAT &&
+							    std::fabs(item.float_value -
+								      binding_.filter_property_list_float) < 0.000001) {
+								select_idx = (int)i;
+								break;
+							}
+							if (info->list_format == OBS_COMBO_FORMAT_STRING &&
+							    item.string_value == binding_.filter_property_list_string) {
+								select_idx = (int)i;
+								break;
+							}
+						}
+						filter_property_list_combo_->setCurrentIndex(select_idx);
+					} else if (has_current_value && !info->list_items.empty()) {
+						filter_property_list_combo_->setCurrentIndex(current_list_index);
+					}
+				}
+			}
+		}
 
 		bool_checkbox_->setVisible(show_bool);
 		volume_label_->setVisible(show_volume);
 		volume_spin_->setVisible(show_volume);
+		filter_property_list_label_->setVisible(show_property_list);
+		filter_property_list_combo_->setVisible(show_property_list);
 		volume_allow_above_unity_->setVisible(show_above_unity);
 		if (!show_above_unity) {
 			volume_allow_above_unity_->setChecked(false);
@@ -1035,16 +1455,68 @@ private:
 			if (volume_spin_->value() <= 0.1) {
 				volume_spin_->setValue(1.0);
 			}
+		} else if (action == JoypadActionType::SetFilterProperty) {
+			const FilterPropertyInfo *info = CurrentFilterPropertyInfo();
+			if (info && (info->type == OBS_PROPERTY_INT || info->type == OBS_PROPERTY_FLOAT)) {
+				bool current_bool = false;
+				double current_number = 0.0;
+				int current_list_index = 0;
+				const bool has_current_value = ReadCurrentFilterPropertyValue(
+					*info, current_bool, current_number, current_list_index);
+				const double minv = info->min_value;
+				const double maxv = info->max_value;
+				volume_spin_->setRange(minv, maxv);
+				if (info->type == OBS_PROPERTY_INT) {
+					volume_spin_->setSingleStep(1.0);
+					volume_spin_->setDecimals(0);
+				} else {
+					volume_spin_->setSingleStep(0.1);
+					volume_spin_->setDecimals(3);
+				}
+				volume_spin_->setSuffix("");
+				if (existing_ && binding_.filter_property_name == info->name) {
+					volume_spin_->setValue(binding_.filter_property_value);
+				} else if (has_current_value) {
+					volume_spin_->setValue(std::clamp(current_number, minv, maxv));
+				} else if (volume_spin_->value() < minv || volume_spin_->value() > maxv) {
+					volume_spin_->setValue(minv);
+				}
+			}
+		} else if (action == JoypadActionType::AdjustFilterProperty) {
+			const FilterPropertyInfo *info = CurrentFilterPropertyInfo();
+			if (info && (info->type == OBS_PROPERTY_INT || info->type == OBS_PROPERTY_FLOAT)) {
+				volume_spin_->setRange(-1000000.0, 1000000.0);
+				if (info->type == OBS_PROPERTY_INT) {
+					volume_spin_->setSingleStep(1.0);
+					volume_spin_->setDecimals(0);
+				} else {
+					volume_spin_->setSingleStep(0.1);
+					volume_spin_->setDecimals(3);
+				}
+				volume_spin_->setSuffix("");
+				if (std::fabs(volume_spin_->value()) < 0.000001) {
+					volume_spin_->setValue(info->type == OBS_PROPERTY_INT ? 1.0 : 0.1);
+				}
+			}
 		}
 		if (show_volume) {
 			volume_allow_above_unity_->setChecked(binding_.allow_above_unity);
 		}
 		if (action == JoypadActionType::SetSourceVolumePercent) {
 			volume_label_->setText(L("JoypadToOBS.Field.Multiplier"));
+		} else if (action == JoypadActionType::SetFilterProperty) {
+			volume_label_->setText(L("JoypadToOBS.Field.PropertyValue"));
+		} else if (action == JoypadActionType::AdjustFilterProperty) {
+			volume_label_->setText(L("JoypadToOBS.Field.Step"));
 		} else {
 			volume_label_->setText(L("JoypadToOBS.Field.Volume"));
 		}
 		UpdateAxisUi(learned_event_.is_axis);
+		if (QLayout *lyt = layout()) {
+			lyt->activate();
+		}
+		adjustSize();
+		updating_action_ui_ = false;
 	}
 
 	void OnListen()
@@ -1132,6 +1604,22 @@ private:
 									.arg(percent, 0, 'f', 0) +
 								" " +
 								L("JoypadToOBS.Common.DbValue").arg(db, 0, 'f', 1));
+						} else if (CurrentAction() == JoypadActionType::SetFilterProperty) {
+							const FilterPropertyInfo *info = CurrentFilterPropertyInfo();
+							if (info && (info->type == OBS_PROPERTY_INT ||
+								     info->type == OBS_PROPERTY_FLOAT)) {
+								double mapped = map_axis_raw_to_range_for_test(
+									binding_, event.axis_raw_value, info->min_value,
+									info->max_value);
+								axis_value_slider_->setValue((int)event.axis_raw_value);
+								axis_live_value_label_->setText(QString::number(
+									mapped, 'f',
+									info->type == OBS_PROPERTY_INT ? 0 : 3));
+							} else {
+								axis_value_slider_->setValue((int)event.axis_raw_value);
+								axis_live_value_label_->setText(
+									QString::number(last_axis_value_, 'f', 2));
+							}
 						} else {
 							axis_value_slider_->setValue((int)event.axis_raw_value);
 							axis_live_value_label_->setText(
@@ -1222,10 +1710,12 @@ private:
 		binding_.scene_name = scene_combo_->currentText().toStdString();
 		binding_.source_name = source_combo_->currentData().toString().toStdString();
 		binding_.filter_name = filter_combo_->currentText().toStdString();
+		binding_.filter_property_name = filter_property_combo_->currentData().toString().toStdString();
 		binding_.bool_value = bool_checkbox_->isChecked();
 		bool is_volume_action = (binding_.action == JoypadActionType::SetSourceVolume) ||
 					(binding_.action == JoypadActionType::AdjustSourceVolume) ||
-					(binding_.action == JoypadActionType::SetSourceVolumePercent);
+					(binding_.action == JoypadActionType::SetSourceVolumePercent) ||
+					(binding_.action == JoypadActionType::AdjustFilterProperty);
 		binding_.allow_above_unity = (binding_.action == JoypadActionType::SetSourceVolume ||
 					      binding_.action == JoypadActionType::AdjustSourceVolume)
 						     ? volume_allow_above_unity_->isChecked()
@@ -1235,6 +1725,43 @@ private:
 			binding_.volume_value = 0.0;
 		} else {
 			binding_.volume_value = is_volume_action ? volume_spin_->value() : 0.0;
+		}
+		if (binding_.action == JoypadActionType::SetFilterProperty ||
+		    binding_.action == JoypadActionType::AdjustFilterProperty) {
+			const FilterPropertyInfo *info = CurrentFilterPropertyInfo();
+			if (!info) {
+				button_label_->setText(L("JoypadToOBS.Common.NoFilterPropertySelected"));
+				return false;
+			}
+			binding_.filter_property_name = info->name;
+			binding_.filter_property_type = (int)info->type;
+			binding_.filter_property_min = info->min_value;
+			binding_.filter_property_max = info->max_value;
+			binding_.filter_property_value = volume_spin_->value();
+			binding_.filter_property_list_format = (int)info->list_format;
+			binding_.filter_property_list_string.clear();
+			binding_.filter_property_list_int = 0;
+			binding_.filter_property_list_float = 0.0;
+			if (binding_.action == JoypadActionType::SetFilterProperty && info->type == OBS_PROPERTY_LIST) {
+				const int idx = filter_property_list_combo_->currentData().toInt();
+				if (idx < 0 || idx >= (int)info->list_items.size()) {
+					button_label_->setText(L("JoypadToOBS.Common.NoFilterPropertySelected"));
+					return false;
+				}
+				const auto &item = info->list_items[(size_t)idx];
+				if (info->list_format == OBS_COMBO_FORMAT_INT) {
+					binding_.filter_property_list_int = item.int_value;
+				} else if (info->list_format == OBS_COMBO_FORMAT_FLOAT) {
+					binding_.filter_property_list_float = item.float_value;
+				} else {
+					binding_.filter_property_list_string = item.string_value;
+				}
+			}
+			if (binding_.action == JoypadActionType::AdjustFilterProperty &&
+			    !(info->type == OBS_PROPERTY_INT || info->type == OBS_PROPERTY_FLOAT)) {
+				button_label_->setText(L("JoypadToOBS.Common.NumericPropertyOnly"));
+				return false;
+			}
 		}
 
 		// Cleanup unused fields based on action
@@ -1264,9 +1791,15 @@ private:
 				    (binding_.action == JoypadActionType::MediaRestart) ||
 				    (binding_.action == JoypadActionType::MediaStop) ||
 				    (binding_.action == JoypadActionType::ToggleFilterEnabled) ||
-				    (binding_.action == JoypadActionType::SetFilterEnabled);
+				    (binding_.action == JoypadActionType::SetFilterEnabled) ||
+				    (binding_.action == JoypadActionType::SetFilterProperty) ||
+				    (binding_.action == JoypadActionType::AdjustFilterProperty);
 		bool needs_filter = (binding_.action == JoypadActionType::ToggleFilterEnabled ||
-				     binding_.action == JoypadActionType::SetFilterEnabled);
+				     binding_.action == JoypadActionType::SetFilterEnabled ||
+				     binding_.action == JoypadActionType::SetFilterProperty ||
+				     binding_.action == JoypadActionType::AdjustFilterProperty);
+		bool needs_filter_property = (binding_.action == JoypadActionType::SetFilterProperty ||
+					      binding_.action == JoypadActionType::AdjustFilterProperty);
 		bool needs_bool = (binding_.action == JoypadActionType::SetSourceVisibility ||
 				   binding_.action == JoypadActionType::SetSourceMute ||
 				   binding_.action == JoypadActionType::SetFilterEnabled);
@@ -1275,6 +1808,12 @@ private:
 		bool needs_gamma = (binding_.action == JoypadActionType::SetSourceVolumePercent);
 		bool needs_unity = (binding_.action == JoypadActionType::SetSourceVolume ||
 				    binding_.action == JoypadActionType::AdjustSourceVolume);
+		if (binding_.action == JoypadActionType::SetFilterProperty ||
+		    binding_.action == JoypadActionType::AdjustFilterProperty) {
+			needs_bool = needs_bool || (binding_.filter_property_type == OBS_PROPERTY_BOOL);
+			needs_volume = needs_volume || (binding_.filter_property_type == OBS_PROPERTY_INT ||
+							binding_.filter_property_type == OBS_PROPERTY_FLOAT);
+		}
 
 		if (!needs_scene) {
 			binding_.scene_name.clear();
@@ -1288,6 +1827,17 @@ private:
 			binding_.source_name.clear();
 		if (!needs_filter)
 			binding_.filter_name.clear();
+		if (!needs_filter_property) {
+			binding_.filter_property_name.clear();
+			binding_.filter_property_type = 0;
+			binding_.filter_property_value = 0.0;
+			binding_.filter_property_min = 0.0;
+			binding_.filter_property_max = 1.0;
+			binding_.filter_property_list_format = 0;
+			binding_.filter_property_list_string.clear();
+			binding_.filter_property_list_int = 0;
+			binding_.filter_property_list_float = 0.0;
+		}
 		if (!needs_bool)
 			binding_.bool_value = false;
 		if (!needs_volume)
@@ -1331,16 +1881,22 @@ private:
 	QComboBox *scene_combo_ = nullptr;
 	QComboBox *source_combo_ = nullptr;
 	QComboBox *filter_combo_ = nullptr;
+	QLabel *filter_property_label_ = nullptr;
+	QComboBox *filter_property_combo_ = nullptr;
 
 	QComboBox *action_combo_ = nullptr;
 	QCheckBox *bool_checkbox_ = nullptr;
 	QLabel *volume_label_ = nullptr;
 	QDoubleSpinBox *volume_spin_ = nullptr;
+	QLabel *filter_property_list_label_ = nullptr;
+	QComboBox *filter_property_list_combo_ = nullptr;
 	QCheckBox *volume_allow_above_unity_ = nullptr;
 	QCheckBox *invert_axis_checkbox_ = nullptr;
 	QCheckBox *test_mode_checkbox_ = nullptr;
 	int axis_handler_id_ = 0;
 	bool is_listening_ = false;
+	bool updating_action_ui_ = false;
+	std::vector<FilterPropertyInfo> filter_properties_;
 };
 
 } // namespace
@@ -1407,6 +1963,19 @@ bool JoypadUiEmulateBindingDialogAction(const JoypadEvent &event, JoypadActionEn
 		actions->Execute(adjusted);
 		return true;
 	}
+	if (binding.action == JoypadActionType::SetFilterProperty &&
+	    (binding.filter_property_type == OBS_PROPERTY_INT || binding.filter_property_type == OBS_PROPERTY_FLOAT)) {
+		double target_min = binding.filter_property_min;
+		double target_max = binding.filter_property_max;
+		if (target_max <= target_min) {
+			target_min = 0.0;
+			target_max = 1.0;
+		}
+		adjusted.filter_property_value =
+			map_axis_raw_to_range_for_test(binding, event.axis_raw_value, target_min, target_max);
+		actions->Execute(adjusted);
+		return true;
+	}
 	if (binding.axis_direction != JoypadAxisDirection::Both) {
 		int dir = value >= 0.0 ? 1 : -1;
 		if (dir != (int)binding.axis_direction) {
@@ -1438,7 +2007,8 @@ bool JoypadUiEmulateBindingDialogAction(const JoypadEvent &event, JoypadActionEn
 		}
 		g_dialog_axis_last_dispatch[interval_key] = now;
 	}
-	if (binding.action == JoypadActionType::AdjustSourceVolume) {
+	if (binding.action == JoypadActionType::AdjustSourceVolume ||
+	    binding.action == JoypadActionType::AdjustFilterProperty) {
 		double sign = value >= 0.0 ? 1.0 : -1.0;
 		adjusted.volume_value = std::fabs(binding.volume_value) * sign;
 	}
@@ -2010,6 +2580,18 @@ void JoypadToolsDialog::RefreshBindings()
 		case JoypadActionType::ToggleFilterEnabled:
 		case JoypadActionType::SetFilterEnabled:
 			source_filter_text = QString::fromStdString(binding.filter_name);
+			break;
+		case JoypadActionType::SetFilterProperty:
+			source_filter_text = QString::fromStdString(binding.filter_name);
+			if (!binding.filter_property_name.empty()) {
+				source_filter_text += " :: " + QString::fromStdString(binding.filter_property_name);
+			}
+			break;
+		case JoypadActionType::AdjustFilterProperty:
+			source_filter_text = QString::fromStdString(binding.filter_name);
+			if (!binding.filter_property_name.empty()) {
+				source_filter_text += " :: " + QString::fromStdString(binding.filter_property_name);
+			}
 			break;
 		default:
 			break;

@@ -20,6 +20,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 
 #include <obs-frontend-api.h>
 #include <obs-module.h>
+#include <obs-properties.h>
 #include <algorithm>
 #include <cmath>
 #include <QMetaObject>
@@ -279,6 +280,146 @@ void JoypadActionEngine::Execute(const JoypadBinding &binding)
 		bool new_enabled = (binding.action == JoypadActionType::ToggleFilterEnabled) ? !enabled
 											     : binding.bool_value;
 		obs_source_set_enabled(filter, new_enabled);
+		obs_source_release(filter);
+		obs_source_release(source);
+		break;
+	}
+	case JoypadActionType::SetFilterProperty: {
+		if (binding.source_name.empty() || binding.filter_name.empty() ||
+		    binding.filter_property_name.empty()) {
+			return;
+		}
+		obs_source_t *source = obs_get_source_by_name(binding.source_name.c_str());
+		if (!source) {
+			return;
+		}
+		obs_source_t *filter = obs_source_get_filter_by_name(source, binding.filter_name.c_str());
+		if (!filter) {
+			obs_source_release(source);
+			return;
+		}
+
+		obs_properties_t *props = obs_source_properties(filter);
+		if (!props) {
+			obs_source_release(filter);
+			obs_source_release(source);
+			return;
+		}
+		obs_property_t *prop = obs_properties_get(props, binding.filter_property_name.c_str());
+		if (!prop) {
+			obs_properties_destroy(props);
+			obs_source_release(filter);
+			obs_source_release(source);
+			return;
+		}
+		obs_data_t *settings = obs_source_get_settings(filter);
+		if (!settings) {
+			obs_properties_destroy(props);
+			obs_source_release(filter);
+			obs_source_release(source);
+			return;
+		}
+
+		const enum obs_property_type prop_type = obs_property_get_type(prop);
+		switch (prop_type) {
+		case OBS_PROPERTY_BOOL:
+			obs_data_set_bool(settings, binding.filter_property_name.c_str(), binding.bool_value);
+			break;
+		case OBS_PROPERTY_INT: {
+			const int minv = obs_property_int_min(prop);
+			const int maxv = obs_property_int_max(prop);
+			long long value = (long long)std::llround(binding.filter_property_value);
+			value = std::clamp(value, (long long)minv, (long long)maxv);
+			obs_data_set_int(settings, binding.filter_property_name.c_str(), value);
+		} break;
+		case OBS_PROPERTY_FLOAT: {
+			const double minv = obs_property_float_min(prop);
+			const double maxv = obs_property_float_max(prop);
+			double value = std::clamp(binding.filter_property_value, minv, maxv);
+			obs_data_set_double(settings, binding.filter_property_name.c_str(), value);
+		} break;
+		case OBS_PROPERTY_LIST: {
+			const enum obs_combo_format format = obs_property_list_format(prop);
+			if (format == OBS_COMBO_FORMAT_INT) {
+				obs_data_set_int(settings, binding.filter_property_name.c_str(),
+						 binding.filter_property_list_int);
+			} else if (format == OBS_COMBO_FORMAT_FLOAT) {
+				obs_data_set_double(settings, binding.filter_property_name.c_str(),
+						    binding.filter_property_list_float);
+			} else {
+				obs_data_set_string(settings, binding.filter_property_name.c_str(),
+						    binding.filter_property_list_string.c_str());
+			}
+		} break;
+		default:
+			break;
+		}
+
+		obs_source_update(filter, settings);
+		obs_data_release(settings);
+		obs_properties_destroy(props);
+		obs_source_release(filter);
+		obs_source_release(source);
+		break;
+	}
+	case JoypadActionType::AdjustFilterProperty: {
+		if (binding.source_name.empty() || binding.filter_name.empty() ||
+		    binding.filter_property_name.empty()) {
+			return;
+		}
+		obs_source_t *source = obs_get_source_by_name(binding.source_name.c_str());
+		if (!source) {
+			return;
+		}
+		obs_source_t *filter = obs_source_get_filter_by_name(source, binding.filter_name.c_str());
+		if (!filter) {
+			obs_source_release(source);
+			return;
+		}
+
+		obs_properties_t *props = obs_source_properties(filter);
+		if (!props) {
+			obs_source_release(filter);
+			obs_source_release(source);
+			return;
+		}
+		obs_property_t *prop = obs_properties_get(props, binding.filter_property_name.c_str());
+		if (!prop) {
+			obs_properties_destroy(props);
+			obs_source_release(filter);
+			obs_source_release(source);
+			return;
+		}
+		obs_data_t *settings = obs_source_get_settings(filter);
+		if (!settings) {
+			obs_properties_destroy(props);
+			obs_source_release(filter);
+			obs_source_release(source);
+			return;
+		}
+
+		const enum obs_property_type prop_type = obs_property_get_type(prop);
+		if (prop_type == OBS_PROPERTY_INT) {
+			const int minv = obs_property_int_min(prop);
+			const int maxv = obs_property_int_max(prop);
+			const long long current = obs_data_get_int(settings, binding.filter_property_name.c_str());
+			const long long delta = (long long)std::llround(binding.volume_value);
+			long long next = current + delta;
+			next = std::clamp(next, (long long)minv, (long long)maxv);
+			obs_data_set_int(settings, binding.filter_property_name.c_str(), next);
+			obs_source_update(filter, settings);
+		} else if (prop_type == OBS_PROPERTY_FLOAT) {
+			const double minv = obs_property_float_min(prop);
+			const double maxv = obs_property_float_max(prop);
+			const double current = obs_data_get_double(settings, binding.filter_property_name.c_str());
+			double next = current + binding.volume_value;
+			next = std::clamp(next, minv, maxv);
+			obs_data_set_double(settings, binding.filter_property_name.c_str(), next);
+			obs_source_update(filter, settings);
+		}
+
+		obs_data_release(settings);
+		obs_properties_destroy(props);
 		obs_source_release(filter);
 		obs_source_release(source);
 		break;
