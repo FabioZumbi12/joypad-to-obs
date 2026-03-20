@@ -658,6 +658,19 @@ void JoypadActionEngine::Execute(const JoypadBinding &binding)
 			});
 		}
 		break;
+	case JoypadActionType::Screenshot:
+		if (binding.screenshot_target == JoypadScreenshotTarget::Program) {
+			obs_frontend_take_screenshot();
+			break;
+		}
+		if (binding.source_name.empty()) {
+			return;
+		}
+		if (obs_source_t *source = obs_get_source_by_name(binding.source_name.c_str())) {
+			obs_frontend_take_source_screenshot(source);
+			obs_source_release(source);
+		}
+		break;
 	default:
 		break;
 	}

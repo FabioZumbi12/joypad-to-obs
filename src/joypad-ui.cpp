@@ -18,6 +18,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 
 #include "joypad-ui.h"
 #include "joypad-actions.h"
+#include "plugin-support.h"
 
 #include <obs-frontend-api.h>
 #include <obs-module.h>
@@ -187,6 +188,20 @@ QString action_to_text(JoypadActionType action)
 		return L("JoypadToOBS.Action.AdjustFilterProperty");
 	case JoypadActionType::SourceTransform:
 		return L("JoypadToOBS.Action.SourceTransform");
+	case JoypadActionType::Screenshot:
+		return L("JoypadToOBS.Action.Screenshot");
+	default:
+		return L("JoypadToOBS.Common.Unknown");
+	}
+}
+
+QString screenshot_target_to_text(JoypadScreenshotTarget target)
+{
+	switch (target) {
+	case JoypadScreenshotTarget::Program:
+		return L("JoypadToOBS.ScreenshotTarget.Program");
+	case JoypadScreenshotTarget::Source:
+		return L("JoypadToOBS.ScreenshotTarget.Source");
 	default:
 		return L("JoypadToOBS.Common.Unknown");
 	}
@@ -282,6 +297,8 @@ QString binding_details(const JoypadBinding &binding)
 		return QString::number(binding.volume_value, 'f', 3);
 	case JoypadActionType::SourceTransform:
 		return source_transform_to_text(binding.source_transform_op);
+	case JoypadActionType::Screenshot:
+		return screenshot_target_to_text(binding.screenshot_target);
 	default:
 		return QString();
 	}
@@ -334,6 +351,7 @@ struct SourceItem {
 	std::string name;
 	std::string type_id;
 	bool has_audio = false;
+	bool has_video = false;
 	bool is_media = false;
 };
 
@@ -355,7 +373,9 @@ std::vector<SourceItem> get_sources_for_action(JoypadActionType action)
 			SourceItem item;
 			item.name = name;
 			item.type_id = type_id ? type_id : "";
-			item.has_audio = (obs_source_get_output_flags(source) & OBS_SOURCE_AUDIO) != 0;
+			const uint32_t output_flags = obs_source_get_output_flags(source);
+			item.has_audio = (output_flags & OBS_SOURCE_AUDIO) != 0;
+			item.has_video = (output_flags & OBS_SOURCE_VIDEO) != 0;
 			item.is_media = obs_source_media_get_state(source) != OBS_MEDIA_STATE_NONE;
 			list->push_back(item);
 			return true;
@@ -368,18 +388,23 @@ std::vector<SourceItem> get_sources_for_action(JoypadActionType action)
 		(action == JoypadActionType::SetSourceVolumePercent);
 	auto is_media_action = (action == JoypadActionType::MediaPlayPause) ||
 			       (action == JoypadActionType::MediaRestart) || (action == JoypadActionType::MediaStop);
+	auto is_screenshot_source_action = (action == JoypadActionType::Screenshot);
 
-	items.erase(std::remove_if(items.begin(), items.end(),
-				   [is_audio_action, is_media_action](const SourceItem &item) {
-					   if (is_media_action) {
-						   return !item.is_media;
-					   }
-					   if (is_audio_action) {
-						   return !item.has_audio;
-					   }
-					   return false;
-				   }),
-		    items.end());
+	items.erase(
+		std::remove_if(items.begin(), items.end(),
+			       [is_audio_action, is_media_action, is_screenshot_source_action](const SourceItem &item) {
+				       if (is_media_action) {
+					       return !item.is_media;
+				       }
+				       if (is_audio_action) {
+					       return !item.has_audio;
+				       }
+				       if (is_screenshot_source_action) {
+					       return !item.has_video;
+				       }
+				       return false;
+			       }),
+		items.end());
 
 	std::sort(items.begin(), items.end(), [](const SourceItem &a, const SourceItem &b) { return a.name < b.name; });
 	items.erase(std::unique(items.begin(), items.end(),
@@ -762,9 +787,16 @@ public:
 				       (int)JoypadActionType::ToggleStudioMode);
 		action_combo_->addItem(action_to_text(JoypadActionType::TransitionToProgram),
 				       (int)JoypadActionType::TransitionToProgram);
+		action_combo_->addItem(action_to_text(JoypadActionType::Screenshot), (int)JoypadActionType::Screenshot);
 
 		bool_checkbox_ = new QCheckBox(L("JoypadToOBS.Common.Enable"), action_group);
 		volume_spin_ = new QDoubleSpinBox(action_group);
+		screenshot_target_label_ = new QLabel(L("JoypadToOBS.Field.ScreenshotTarget"), action_group);
+		screenshot_target_combo_ = new QComboBox(action_group);
+		screenshot_target_combo_->addItem(screenshot_target_to_text(JoypadScreenshotTarget::Program),
+						  (int)JoypadScreenshotTarget::Program);
+		screenshot_target_combo_->addItem(screenshot_target_to_text(JoypadScreenshotTarget::Source),
+						  (int)JoypadScreenshotTarget::Source);
 		filter_property_list_label_ = new QLabel(L("JoypadToOBS.Field.PropertyValue"), action_group);
 		filter_property_list_combo_ = new QComboBox(action_group);
 		volume_allow_above_unity_ = new QCheckBox(L("JoypadToOBS.Field.AllowAboveDb"), action_group);
@@ -777,15 +809,17 @@ public:
 
 		action_layout->addWidget(new QLabel(L("JoypadToOBS.Field.Action")), 0, 0);
 		action_layout->addWidget(action_combo_, 0, 1);
-		action_layout->addWidget(bool_checkbox_, 1, 0, 1, 2);
+		action_layout->addWidget(screenshot_target_label_, 1, 0);
+		action_layout->addWidget(screenshot_target_combo_, 1, 1);
+		action_layout->addWidget(bool_checkbox_, 2, 0, 1, 2);
 		volume_label_ = new QLabel(L("JoypadToOBS.Field.Volume"), action_group);
-		action_layout->addWidget(volume_label_, 2, 0);
-		action_layout->addWidget(volume_spin_, 2, 1);
-		action_layout->addWidget(filter_property_list_label_, 3, 0);
-		action_layout->addWidget(filter_property_list_combo_, 3, 1);
-		action_layout->addWidget(volume_allow_above_unity_, 4, 0, 1, 2);
-		action_layout->addWidget(invert_axis_checkbox_, 5, 0, 1, 2);
-		action_layout->addWidget(test_mode_checkbox_, 6, 0, 1, 2);
+		action_layout->addWidget(volume_label_, 3, 0);
+		action_layout->addWidget(volume_spin_, 3, 1);
+		action_layout->addWidget(filter_property_list_label_, 4, 0);
+		action_layout->addWidget(filter_property_list_combo_, 4, 1);
+		action_layout->addWidget(volume_allow_above_unity_, 5, 0, 1, 2);
+		action_layout->addWidget(invert_axis_checkbox_, 6, 0, 1, 2);
+		action_layout->addWidget(test_mode_checkbox_, 7, 0, 1, 2);
 
 		layout->addWidget(action_group);
 		layout->addWidget(target_group);
@@ -814,6 +848,10 @@ public:
 			[this](int) { UpdateActionUi(); });
 		connect(filter_property_list_combo_, &QComboBox::currentIndexChanged, this,
 			[this](int) { DisableTestModeOnConfigChange(); });
+		connect(screenshot_target_combo_, &QComboBox::currentIndexChanged, this,
+			[this](int) { DisableTestModeOnConfigChange(); });
+		connect(screenshot_target_combo_, &QComboBox::currentIndexChanged, this,
+			[this](int) { UpdateActionUi(); });
 		connect(transform_op_combo_, &QComboBox::currentIndexChanged, this,
 			[this](int) { DisableTestModeOnConfigChange(); });
 		connect(bool_checkbox_, &QCheckBox::toggled, this, [this](bool) { DisableTestModeOnConfigChange(); });
@@ -1219,6 +1257,14 @@ private:
 			}
 		}
 		transform_op_combo_->setCurrentIndex(transform_op_combo_->findData((int)binding.source_transform_op));
+		int screenshot_target_index = screenshot_target_combo_->findData((int)binding.screenshot_target);
+		if (screenshot_target_index < 0) {
+			screenshot_target_index =
+				screenshot_target_combo_->findData((int)JoypadScreenshotTarget::Program);
+		}
+		if (screenshot_target_index >= 0) {
+			screenshot_target_combo_->setCurrentIndex(screenshot_target_index);
+		}
 
 		bool_checkbox_->setChecked(binding.bool_value);
 		volume_allow_above_unity_->setChecked(binding.allow_above_unity);
@@ -1401,6 +1447,9 @@ private:
 		}
 		updating_action_ui_ = true;
 		auto action = CurrentAction();
+		const bool is_screenshot_action = (action == JoypadActionType::Screenshot);
+		const bool screenshot_uses_source = is_screenshot_action &&
+						    (CurrentScreenshotTarget() == JoypadScreenshotTarget::Source);
 		bool needs_scene = (action == JoypadActionType::SwitchScene) ||
 				   (action == JoypadActionType::ToggleSourceVisibility) ||
 				   (action == JoypadActionType::SetSourceVisibility);
@@ -1416,7 +1465,7 @@ private:
 			(action == JoypadActionType::SetFilterEnabled) ||
 			(action == JoypadActionType::SetFilterProperty) ||
 			(action == JoypadActionType::AdjustFilterProperty) ||
-			(action == JoypadActionType::SourceTransform);
+			(action == JoypadActionType::SourceTransform) || screenshot_uses_source;
 		if (action == JoypadActionType::SourceTransform) {
 			needs_scene = true;
 		}
@@ -1441,6 +1490,9 @@ private:
 		transform_op_label_->setVisible(needs_transform_op);
 		transform_op_combo_->setVisible(needs_transform_op);
 		transform_op_combo_->setEnabled(needs_transform_op);
+		screenshot_target_label_->setVisible(is_screenshot_action);
+		screenshot_target_combo_->setVisible(is_screenshot_action);
+		screenshot_target_combo_->setEnabled(is_screenshot_action);
 
 		ReloadSourcesForAction(action);
 		ReloadFilters();
@@ -1813,6 +1865,7 @@ private:
 		binding_.filter_name = filter_combo_->currentText().toStdString();
 		binding_.filter_property_name = filter_property_combo_->currentData().toString().toStdString();
 		binding_.source_transform_op = (JoypadSourceTransformOp)transform_op_combo_->currentData().toInt();
+		binding_.screenshot_target = CurrentScreenshotTarget();
 		binding_.bool_value = bool_checkbox_->isChecked();
 		bool is_volume_action = (binding_.action == JoypadActionType::SetSourceVolume) ||
 					(binding_.action == JoypadActionType::AdjustSourceVolume) ||
@@ -1898,7 +1951,9 @@ private:
 				    (binding_.action == JoypadActionType::SetFilterEnabled) ||
 				    (binding_.action == JoypadActionType::SetFilterProperty) ||
 				    (binding_.action == JoypadActionType::AdjustFilterProperty) ||
-				    (binding_.action == JoypadActionType::SourceTransform);
+				    (binding_.action == JoypadActionType::SourceTransform) ||
+				    ((binding_.action == JoypadActionType::Screenshot) &&
+				     (binding_.screenshot_target == JoypadScreenshotTarget::Source));
 		bool needs_filter = (binding_.action == JoypadActionType::ToggleFilterEnabled ||
 				     binding_.action == JoypadActionType::SetFilterEnabled ||
 				     binding_.action == JoypadActionType::SetFilterProperty ||
@@ -1946,6 +2001,9 @@ private:
 		if (binding_.action != JoypadActionType::SourceTransform) {
 			binding_.source_transform_op = JoypadSourceTransformOp::CenterToScreen;
 		}
+		if (binding_.action != JoypadActionType::Screenshot) {
+			binding_.screenshot_target = JoypadScreenshotTarget::Program;
+		}
 		if (!needs_bool)
 			binding_.bool_value = false;
 		if (!needs_volume)
@@ -1959,6 +2017,10 @@ private:
 	}
 
 	JoypadActionType CurrentAction() const { return (JoypadActionType)action_combo_->currentData().toInt(); }
+	JoypadScreenshotTarget CurrentScreenshotTarget() const
+	{
+		return (JoypadScreenshotTarget)screenshot_target_combo_->currentData().toInt();
+	}
 
 	JoypadConfigStore *config_ = nullptr;
 	JoypadInputManager *input_ = nullptr;
@@ -1998,6 +2060,8 @@ private:
 	QCheckBox *bool_checkbox_ = nullptr;
 	QLabel *volume_label_ = nullptr;
 	QDoubleSpinBox *volume_spin_ = nullptr;
+	QLabel *screenshot_target_label_ = nullptr;
+	QComboBox *screenshot_target_combo_ = nullptr;
 	QLabel *filter_property_list_label_ = nullptr;
 	QComboBox *filter_property_list_combo_ = nullptr;
 	QCheckBox *volume_allow_above_unity_ = nullptr;
@@ -2380,9 +2444,12 @@ JoypadToolsDialog::JoypadToolsDialog(QWidget *parent, JoypadConfigStore *config,
 	save_button_->setEnabled(config_->HasUnsavedChanges());
 	auto *close_button = new QPushButton(L("JoypadToOBS.Button.Close"), this);
 
-	QLabel *developerLabel = new QLabel(
-		"<a href=\"https://github.com/FabioZumbi12\" style=\"color: gray; text-decoration: none;\"><i>Developed by FabioZumbi12</i></a>",
-		this);
+	const QString plugin_version = QString::fromUtf8(PLUGIN_VERSION ? PLUGIN_VERSION : "");
+	QLabel *developerLabel = new QLabel(QString("<a href=\"https://github.com/FabioZumbi12/joypad-to-obs/\" "
+						    "style=\"color: gray; text-decoration: none;\"><i>Developed by "
+						    "FabioZumbi12 - v%1</i></a>")
+						    .arg(plugin_version),
+					    this);
 	developerLabel->setOpenExternalLinks(true);
 
 	button_row->addWidget(add_button_);
@@ -2707,6 +2774,11 @@ void JoypadToolsDialog::RefreshBindings()
 			scene_text = binding.use_current_scene ? L("JoypadToOBS.Common.Current")
 							       : QString::fromStdString(binding.scene_name);
 			source_filter_text = QString::fromStdString(binding.source_name);
+			break;
+		case JoypadActionType::Screenshot:
+			if (binding.screenshot_target == JoypadScreenshotTarget::Source) {
+				source_filter_text = QString::fromStdString(binding.source_name);
+			}
 			break;
 		default:
 			break;

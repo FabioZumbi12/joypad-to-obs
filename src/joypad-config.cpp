@@ -182,6 +182,10 @@ static void load_binding_from_data(JoypadBinding &binding, obs_data_t *data)
 	binding.filter_property_list_int = obs_data_get_int(data, "filter_property_list_int");
 	binding.filter_property_list_float = obs_data_get_double(data, "filter_property_list_float");
 	binding.source_transform_op = (JoypadSourceTransformOp)obs_data_get_int(data, "source_transform_op");
+	binding.screenshot_target = (JoypadScreenshotTarget)obs_data_get_int(data, "screenshot_target");
+	if (binding.screenshot_target != JoypadScreenshotTarget::Source) {
+		binding.screenshot_target = JoypadScreenshotTarget::Program;
+	}
 	binding.bool_value = obs_data_get_bool(data, "bool_value");
 	binding.allow_above_unity = obs_data_get_bool(data, "allow_above_unity");
 	if (!binding.allow_above_unity) {
@@ -304,6 +308,12 @@ static void save_binding_to_data(const JoypadBinding &binding, obs_data_t *data)
 		}
 		obs_data_set_string(data, "source_name", binding.source_name.c_str());
 		obs_data_set_int(data, "source_transform_op", (int)binding.source_transform_op);
+		break;
+	case JoypadActionType::Screenshot:
+		obs_data_set_int(data, "screenshot_target", (int)binding.screenshot_target);
+		if (binding.screenshot_target == JoypadScreenshotTarget::Source) {
+			obs_data_set_string(data, "source_name", binding.source_name.c_str());
+		}
 		break;
 	default:
 		break;

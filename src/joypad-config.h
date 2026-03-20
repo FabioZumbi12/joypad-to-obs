@@ -51,6 +51,7 @@ enum class JoypadActionType {
 	SetFilterProperty = 20,
 	AdjustFilterProperty = 21,
 	SourceTransform = 22,
+	Screenshot = 23,
 };
 
 enum class JoypadInputType {
@@ -97,6 +98,11 @@ enum class JoypadSourceTransformOp {
 	StretchToScreen = 17,
 };
 
+enum class JoypadScreenshotTarget {
+	Program = 0,
+	Source = 1,
+};
+
 struct JoypadBinding {
 	int64_t uid = 0;
 	std::string device_id;
@@ -132,6 +138,7 @@ struct JoypadBinding {
 	long long filter_property_list_int = 0;
 	double filter_property_list_float = 0.0;
 	JoypadSourceTransformOp source_transform_op = JoypadSourceTransformOp::CenterToScreen;
+	JoypadScreenshotTarget screenshot_target = JoypadScreenshotTarget::Program;
 
 	bool bool_value = false;
 	bool allow_above_unity = false;
