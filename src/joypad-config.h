@@ -177,9 +177,6 @@ public:
 
 	std::vector<JoypadBinding> GetBindingsSnapshot() const;
 	std::vector<JoypadBinding> FindMatchingBindings(const JoypadEvent &event) const;
-	void SetAxisLastRaw(const std::string &key, double raw);
-	bool ConsumeAxisLastRaw(const std::string &key, double &raw_out);
-	void ClearAxisLastRaw();
 	void SwitchProfileByHotkey(obs_hotkey_id id);
 
 	// Profile Management
@@ -216,7 +213,6 @@ private:
 	std::atomic<bool> dirty_{false};
 	mutable std::unordered_map<std::string, bool> axis_active_;
 	mutable std::unordered_map<std::string, std::chrono::steady_clock::time_point> axis_last_dispatch_;
-	std::unordered_map<std::string, double> axis_last_raw_;
 	std::string last_file_path_;
 	ProfileSwitchCallback on_profile_switch_;
 	bool osd_enabled_ = true;

@@ -320,7 +320,6 @@ void JoypadConfigStore::Load()
 	profiles_.clear();
 	current_profile_index_ = 0;
 	axis_active_.clear();
-	axis_last_raw_.clear();
 	dirty_ = false;
 
 	ensure_config_dir();
@@ -517,24 +516,6 @@ void JoypadConfigStore::Load()
 		}
 	}
 
-	obs_data_array_t *axis_array = obs_data_get_array(data, "axis_last_values");
-	if (axis_array) {
-		size_t count = obs_data_array_count(axis_array);
-		for (size_t i = 0; i < count; ++i) {
-			obs_data_t *item = obs_data_array_item(axis_array, i);
-			if (!item) {
-				continue;
-			}
-			const char *key = obs_data_get_string(item, "key");
-			double raw = obs_data_get_double(item, "raw");
-			if (key && *key) {
-				axis_last_raw_[key] = raw;
-			}
-			obs_data_release(item);
-		}
-		obs_data_array_release(axis_array);
-	}
-
 	if (profiles_.empty()) {
 		profiles_.push_back({"Default", {}});
 	}
@@ -611,17 +592,6 @@ void JoypadConfigStore::Save()
 
 	obs_data_set_int(data, "current_profile_index", current_profile_index_);
 
-	obs_data_array_t *axis_array = obs_data_array_create();
-	for (const auto &entry : axis_last_raw_) {
-		obs_data_t *item = obs_data_create();
-		obs_data_set_string(item, "key", entry.first.c_str());
-		obs_data_set_double(item, "raw", entry.second);
-		obs_data_array_push_back(axis_array, item);
-		obs_data_release(item);
-	}
-	obs_data_set_array(data, "axis_last_values", axis_array);
-	obs_data_array_release(axis_array);
-
 	obs_data_set_bool(data, "osd_enabled", osd_enabled_);
 	obs_data_set_string(data, "osd_color", osd_color_.c_str());
 	obs_data_set_string(data, "osd_background_color", osd_background_color_.c_str());
@@ -635,36 +605,6 @@ void JoypadConfigStore::Save()
 
 	obs_data_release(data);
 	bfree(config_path);
-}
-
-void JoypadConfigStore::SetAxisLastRaw(const std::string &key, double raw)
-{
-	if (key.empty()) {
-		return;
-	}
-	std::lock_guard<std::mutex> lock(mutex_);
-	axis_last_raw_[key] = raw;
-}
-
-bool JoypadConfigStore::ConsumeAxisLastRaw(const std::string &key, double &raw_out)
-{
-	if (key.empty()) {
-		return false;
-	}
-	std::lock_guard<std::mutex> lock(mutex_);
-	auto it = axis_last_raw_.find(key);
-	if (it == axis_last_raw_.end()) {
-		return false;
-	}
-	raw_out = it->second;
-	axis_last_raw_.erase(it);
-	return true;
-}
-
-void JoypadConfigStore::ClearAxisLastRaw()
-{
-	std::lock_guard<std::mutex> lock(mutex_);
-	axis_last_raw_.clear();
 }
 
 void JoypadConfigStore::SetProfileSwitchCallback(ProfileSwitchCallback callback)

@@ -186,37 +186,6 @@ void toggle_input_listening_hotkey_callback(void *data, obs_hotkey_id id, obs_ho
 	ShowOsdNotification(message);
 }
 
-std::string MakeAxisKey(const JoypadBinding &binding)
-{
-	std::string key = binding.device_stable_id.empty() ? binding.device_id : binding.device_stable_id;
-	key += "|";
-	key += binding.source_name;
-	key += "|";
-	key += std::to_string(binding.axis_index);
-	return key;
-}
-
-double MapRawToPercentWithGamma(const JoypadBinding &binding, double raw)
-{
-	double minv = binding.axis_min_value;
-	double maxv = binding.axis_max_value;
-	if (maxv <= minv) {
-		minv = 0.0;
-		maxv = 1024.0;
-	}
-	double percent = ((raw - minv) / (maxv - minv)) * 100.0;
-	if (binding.axis_inverted || binding.axis_direction == JoypadAxisDirection::Negative) {
-		percent = 100.0 - percent;
-	}
-	percent = std::clamp(percent, 0.0, 100.0);
-	double base = percent / 100.0;
-	base = std::clamp(base, 0.0, 1.0);
-	double gamma = binding.slider_gamma > 0.0 ? binding.slider_gamma : 0.6;
-	gamma = std::clamp(gamma, 0.1, 50.0);
-	double curved = std::pow(base, gamma);
-	return std::clamp(curved * 100.0, 0.0, 100.0);
-}
-
 QString BuildOsdStyle(const QString &text_color, const QString &background_color, int font_size)
 {
 	return QString("QLabel { background-color: %1; color: %2; border-radius: 0px; padding: 8px; "
@@ -240,33 +209,6 @@ QString ToCssColor(const QString &input, const QString &fallback)
 		.arg(parsed.green())
 		.arg(parsed.blue())
 		.arg(parsed.alpha());
-}
-
-void ApplyStoredAxisValues()
-{
-	auto bindings = g_config.GetBindingsSnapshot();
-	for (const auto &binding_ref : bindings) {
-		if (!binding_ref.enabled) {
-			continue;
-		}
-		if (binding_ref.action != JoypadActionType::SetSourceVolumePercent ||
-		    binding_ref.input_type != JoypadInputType::Axis) {
-			continue;
-		}
-		double stored_raw = 0.0;
-		std::string key = MakeAxisKey(binding_ref);
-		if (!g_config.ConsumeAxisLastRaw(key, stored_raw)) {
-			continue;
-		}
-		JoypadBinding adjusted = binding_ref;
-		adjusted.volume_value = MapRawToPercentWithGamma(binding_ref, stored_raw);
-		g_actions.Execute(adjusted);
-	}
-}
-
-void StoreAxisLastRawOnShutdown()
-{
-	// Values are now updated in real-time in OnAxisChanged
 }
 
 static void save_hotkeys(obs_data_t *save_data, bool saving, void *private_data)
@@ -352,12 +294,8 @@ bool obs_module_load(void)
 		}
 		for (const auto &binding : matches) {
 			g_actions.Execute(binding);
-			if (binding.action == JoypadActionType::SetSourceVolumePercent) {
-				g_config.SetAxisLastRaw(MakeAxisKey(binding), event.axis_raw_value);
-			}
 		}
 	});
-	ApplyStoredAxisValues();
 #if defined(_WIN32)
 	{
 		auto *main_window = reinterpret_cast<QWidget *>(obs_frontend_get_main_window());
@@ -400,8 +338,6 @@ void obs_module_unload(void)
 		obs_hotkey_unregister(g_toggle_input_listening_hotkey_id);
 		g_toggle_input_listening_hotkey_id = OBS_INVALID_HOTKEY_ID;
 	}
-	StoreAxisLastRawOnShutdown();
-
 	g_config.SetProfileSwitchCallback({});
 	g_input.SetOnButtonPressed({});
 	g_input.SetOnAxisChanged({});
