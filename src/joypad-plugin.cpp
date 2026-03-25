@@ -18,6 +18,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 
 #include "joypad-actions.h"
 #include "joypad-config.h"
+#include "joypad-dock.h"
 #include "joypad-input.h"
 #include "joypad-ui.h"
 
@@ -26,18 +27,17 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <plugin-support.h>
 
 #include <QAction>
-#include <QWidget>
-#include <atomic>
-#include <algorithm>
-#include <chrono>
-#include <cmath>
-#include <QMetaObject>
 #include <QCoreApplication>
 #include <QLabel>
-#include <QTimer>
+#include <QColor>
+#include <QMetaObject>
 #include <QPropertyAnimation>
 #include <QSequentialAnimationGroup>
-#include <QColor>
+#include <QWidget>
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cmath>
 #if defined(_WIN32)
 #include <windows.h>
 #endif
@@ -53,12 +53,57 @@ std::atomic<bool> g_unloading{false};
 
 QAction *g_tools_action = nullptr;
 JoypadToolsDialog *g_dialog = nullptr;
+QAction *g_dock_action = nullptr;
+JoypadControlDock *g_dock_widget = nullptr;
 obs_hotkey_id g_toggle_input_listening_hotkey_id = OBS_INVALID_HOTKEY_ID;
 
 constexpr const char *kToggleInputListeningHotkeySaveKey = "toggle_input_listening_hotkey";
+constexpr const char *kDockId = "joypad_to_obs_dock";
 
 QString BuildOsdStyle(const QString &text_color, const QString &background_color, int font_size);
 QString ToCssColor(const QString &input, const QString &fallback);
+
+void *AddObsDockCompat(const char *dock_id, const char *title, void *dock_content_widget, void *legacy_qdock_widget)
+{
+#if defined(_WIN32)
+	using add_dock_by_id_fn = void *(*)(const char *, const char *, void *);
+	using add_custom_qdock_fn = void *(*)(const char *, void *);
+	using add_dock_legacy_fn = void *(*)(void *);
+
+	HMODULE frontend_module = GetModuleHandleA("obs-frontend-api.dll");
+	if (!frontend_module) {
+		obs_log(LOG_WARNING, "Could not find obs-frontend-api.dll to register dock");
+		return nullptr;
+	}
+
+	auto add_dock_by_id =
+		reinterpret_cast<add_dock_by_id_fn>(GetProcAddress(frontend_module, "obs_frontend_add_dock_by_id"));
+	if (add_dock_by_id) {
+		return add_dock_by_id(dock_id, title, dock_content_widget);
+	}
+
+	auto add_custom_qdock =
+		reinterpret_cast<add_custom_qdock_fn>(GetProcAddress(frontend_module, "obs_frontend_add_custom_qdock"));
+	if (add_custom_qdock) {
+		return add_custom_qdock(title, dock_content_widget);
+	}
+
+	auto add_dock_legacy =
+		reinterpret_cast<add_dock_legacy_fn>(GetProcAddress(frontend_module, "obs_frontend_add_dock"));
+	if (add_dock_legacy) {
+		return add_dock_legacy(legacy_qdock_widget);
+	}
+
+	obs_log(LOG_WARNING, "No compatible OBS dock API found; dock UI disabled");
+	return nullptr;
+#else
+	(void)dock_id;
+	(void)title;
+	(void)dock_content_widget;
+	(void)legacy_qdock_widget;
+	return nullptr;
+#endif
+}
 
 void ShowOsdNotification(const QString &text)
 {
@@ -233,6 +278,20 @@ static void save_hotkeys(obs_data_t *save_data, bool saving, void *private_data)
 			QMetaObject::invokeMethod(
 				g_dialog, []() { g_dialog->RefreshProfiles(); }, Qt::QueuedConnection);
 		}
+		if (!g_unloading.load(std::memory_order_acquire) && g_dock_widget) {
+			QCoreApplication *app = QCoreApplication::instance();
+			if (app && !QCoreApplication::closingDown()) {
+				auto *dock = g_dock_widget;
+				QMetaObject::invokeMethod(
+					app,
+					[dock]() {
+						if (dock) {
+							dock->RefreshState();
+						}
+					},
+					Qt::QueuedConnection);
+			}
+		}
 		return;
 	}
 
@@ -327,6 +386,18 @@ bool obs_module_load(void)
 		g_dialog->activateWindow();
 	});
 
+	auto *main_window = reinterpret_cast<QWidget *>(obs_frontend_get_main_window());
+	if (main_window) {
+		g_dock_widget = new JoypadControlDock(main_window, &g_config);
+		g_dock_widget->setObjectName(QString::fromUtf8(kDockId));
+		QWidget *dock_content = g_dock_widget->widget();
+		if (!dock_content) {
+			dock_content = g_dock_widget;
+		}
+		g_dock_action = reinterpret_cast<QAction *>(AddObsDockCompat(
+			kDockId, obs_module_text("JoypadToOBS.Dock.Title"), dock_content, g_dock_widget));
+	}
+
 	return true;
 }
 
@@ -347,6 +418,8 @@ void obs_module_unload(void)
 	// Avoid touching Qt objects during teardown; OBS/Qt owns their destruction order.
 	g_dialog = nullptr;
 	g_tools_action = nullptr;
+	g_dock_action = nullptr;
+	g_dock_widget = nullptr;
 
 	g_config.Unload();
 	obs_log(LOG_INFO, "joypad-to-obs unloaded");

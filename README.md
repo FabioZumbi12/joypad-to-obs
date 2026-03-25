@@ -22,6 +22,7 @@ This plugin **does not** provide a visual overlay for your controller. Its purpo
         *   **Auto de-duplication:** When both APIs expose the same physical controller, the plugin avoids duplicate entries/actions.
     *   **Custom Hardware:** Compatible with **Arduino-based devices** that appear as a standard joystick, allowing you to use potentiometers, encoders, and sliders to control OBS.
 *   **Intuitive UI:** A dedicated "Tools" menu dialog to create, edit, and manage all your bindings.
+*   **Dedicated OBS Dock:** A compact dock panel with quick profile switching and gamepad listening on/off status/control.
 *   **"Learn" Mode:** Simply press a button or move an axis on your controller to assign it to an action.
 *   **Advanced Axis Configuration:** Calibrate axis range (Min/Max), set deadzones (Threshold), and invert axis direction for precise control.
 *   **OBS Hotkey to Pause/Resume Controller Listening:** Toggle all gamepad input processing on/off from OBS Hotkeys.
@@ -59,6 +60,16 @@ Joypad to OBS supports a comprehensive set of commands to manage your stream:
 *   **Toggle Streaming:** Start/stop streaming.
 *   **Toggle Recording:** Start/stop recording.
 *   **Toggle Virtual Camera:** Start/stop virtual camera.
+
+## Dock Panel
+
+Joypad to OBS provides an OBS Dock for quick control without opening the full settings window.
+
+*   Open it from **View** -> **Docks** -> **Joypad to OBS**.
+*   The dock shows the current Joypad profile in a dropdown.
+*   Switching profile from the dock updates the active profile immediately.
+*   The dock updates in real time when profile changes happen from hotkeys or other plugin UI.
+*   The dock includes a listening status button (on/off icon) to enable or disable controller input processing.
 
 ## Profile Management
 
@@ -102,15 +113,18 @@ If OSD notifications are enabled, this hotkey also shows the current listening s
     *   **macOS:** `~/Library/Application Support/obs-studio/plugins/`
     *   **Linux:** `~/.config/obs-studio/plugins/`
 2.  **Open the configuration window:** In OBS, go to the **Tools** menu and select **Settings for Joypad to OBS**.
-3.  **Select a Profile:** Choose the profile you want to edit from the dropdown menu, or create a new one.
-4.  **Add a new binding:**
+3.  **(Optional) Open the quick dock panel:** In OBS, go to **View** -> **Docks** -> **Joypad to OBS**.
+4.  **Select a Profile:** Choose the profile you want to edit from the dropdown menu, or create a new one.
+    *   You can also switch the active profile directly from the dock dropdown.
+    *   Use the dock status icon to quickly enable/disable controller listening.
+5.  **Add a new binding:**
     *   Click the **"Add Command"** button.
     *   Click **"Listen"** and press the button or move the axis on your controller that you want to use.
     *   Select the **Action** you want to perform (e.g., "Switch Scene", "Set Source Mute").
     *   Configure the target (e.g., choose the specific scene or source).
     *   Click **OK** to save the binding.
-5.  Your controller is now ready to control OBS!
-6.  (Optional) In **OBS Settings -> Hotkeys**, assign `Joypad to OBS: Toggle gamepad listening` to quickly pause/resume controller input while streaming.
+6.  Your controller is now ready to control OBS!
+7.  (Optional) In **OBS Settings -> Hotkeys**, assign `Joypad to OBS: Toggle gamepad listening` to quickly pause/resume controller input while streaming.
 
 ## Building from Source
 

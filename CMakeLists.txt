@@ -103,10 +103,12 @@ target_sources(
     src/joypad-input.cpp
     src/joypad-actions.cpp
     src/joypad-ui.cpp
+    src/joypad-dock.cpp
     src/joypad-config.h
     src/joypad-input.h
     src/joypad-actions.h
     src/joypad-ui.h
+    src/joypad-dock.h
 )
 
 if(WIN32)

@@ -2094,6 +2094,11 @@ bool JoypadUiToggleInputListeningEnabled()
 	return !expected;
 }
 
+void JoypadUiSetInputListeningEnabled(bool enabled)
+{
+	g_input_listening_enabled.store(enabled, std::memory_order_relaxed);
+}
+
 bool JoypadUiEmulateBindingDialogAction(const JoypadEvent &event, JoypadActionEngine *actions)
 {
 	DialogTestState state;
