@@ -29,7 +29,7 @@ AppPublisherURL=https://example.com/joypad-to-obs
 AppSupportURL=https://example.com/joypad-to-obs
 AppUpdatesURL=https://example.com/joypad-to-obs
 DefaultDirName={reg:HKLM\SOFTWARE\OBS Studio,InstallPath|{autopf}\obs-studio}
-OutputDir=release
+OutputDir=..\release
 OutputBaseFilename={#PluginName}-{#AppVersion}-windows-x64-setup
 Compression=lzma
 SolidCompression=yes
@@ -38,7 +38,7 @@ PrivilegesRequired=admin
 DirExistsWarning=no
 UninstallFilesDir={app}\{#PluginName}-uninstaller
 UninstallDisplayName={#PluginName}-uninstaller
-SetupIconFile=img\game.ico
+SetupIconFile=..\img\game.ico
 UninstallDisplayIcon={uninstallexe}
 
 [Languages]
@@ -62,9 +62,9 @@ english.OBSNotFound=OBS Studio installation not found automatically.#13#10You wi
 
 [Files]
 ; Plugin DLL
-Source: "build_x64\{#BuildConfig}\{#PluginName}.dll"; DestDir: "{app}\obs-plugins\64bit"; Flags: ignoreversion
+Source: "..\build_x64\{#BuildConfig}\{#PluginName}.dll"; DestDir: "{app}\obs-plugins\64bit"; Flags: ignoreversion
 ; Locale files
-Source: "data\locale\*.ini"; DestDir: "{app}\data\obs-plugins\{#PluginName}\locale"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\data\locale\*.ini"; DestDir: "{app}\data\obs-plugins\{#PluginName}\locale"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Run]
 Filename: "{app}\bin\64bit\obs64.exe"; Description: "{cm:LaunchOBS}"; Flags: nowait postinstall skipifsilent

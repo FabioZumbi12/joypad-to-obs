@@ -35,5 +35,4 @@ install/
 
 .vs/
 build_*/
-setup/
 .CMakeBuildNumber

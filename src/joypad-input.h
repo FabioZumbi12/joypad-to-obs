@@ -66,6 +66,7 @@ private:
 		double last_axes[8] = {0};
 		bool axis_initialized[8] = {false};
 		bool connected = false;
+		bool resync_axes = false;
 #if defined(_WIN32)
 		void *di_device = nullptr;
 		bool is_xinput = false;

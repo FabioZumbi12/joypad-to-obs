@@ -17,6 +17,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 */
 
 #include "joypad-input.h"
+#include <plugin-support.h>
 
 #include <chrono>
 #include <algorithm>
@@ -27,6 +28,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <cerrno>
 #include <cstdio>
 #include <unordered_set>
+#include <unordered_map>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -661,6 +663,11 @@ std::vector<JoypadDeviceInfo> JoypadInputManager::GetDevices() const
 void JoypadInputManager::RefreshDevices()
 {
 	std::lock_guard<std::mutex> lock(devices_mutex_);
+	std::unordered_map<std::string, std::string> previous_devices;
+	previous_devices.reserve(device_states_.size());
+	for (const auto &state : device_states_) {
+		previous_devices[state.id] = state.name;
+	}
 	std::vector<DeviceState> next_states;
 	std::vector<JoypadDeviceInfo> next_devices;
 
@@ -858,6 +865,25 @@ void JoypadInputManager::RefreshDevices()
 
 	devices_ = std::move(next_devices);
 	device_states_ = std::move(next_states);
+
+	std::unordered_map<std::string, std::string> current_devices;
+	current_devices.reserve(device_states_.size());
+	for (const auto &state : device_states_) {
+		current_devices[state.id] = state.name;
+	}
+
+	for (const auto &entry : current_devices) {
+		if (previous_devices.find(entry.first) == previous_devices.end()) {
+			obs_log(LOG_INFO, "joypad-to-obs device connected: %s (%s)", entry.first.c_str(),
+				entry.second.c_str());
+		}
+	}
+	for (const auto &entry : previous_devices) {
+		if (current_devices.find(entry.first) == current_devices.end()) {
+			obs_log(LOG_INFO, "joypad-to-obs device disconnected: %s (%s)", entry.first.c_str(),
+				entry.second.c_str());
+		}
+	}
 }
 
 void JoypadInputManager::SetOnButtonPressed(std::function<void(const JoypadEvent &)> handler)
@@ -943,6 +969,11 @@ void JoypadInputManager::MarkDeviceDisconnected(DeviceState &state)
 {
 	state.connected = false;
 	state.last_buttons = 0;
+	state.resync_axes = true;
+	for (int i = 0; i < kMaxTrackedAxes; ++i) {
+		state.axis_initialized[i] = false;
+		state.last_axes[i] = 0.0;
+	}
 }
 
 void JoypadInputManager::PollLoop()
@@ -984,6 +1015,7 @@ void JoypadInputManager::PollLoop()
 
 					HRESULT hr = dev->Poll();
 					if (FAILED(hr)) {
+						MarkDeviceDisconnected(state);
 						hr = dev->Acquire();
 						// Avoid infinite loops when device is unplugged/lost.
 						for (int tries = 0; hr == DIERR_INPUTLOST && tries < 8; ++tries) {
@@ -993,6 +1025,7 @@ void JoypadInputManager::PollLoop()
 					}
 					if (FAILED(hr)) {
 						// Disconnection detection is event-driven (WM_DEVICECHANGE).
+						MarkDeviceDisconnected(state);
 						continue;
 					}
 
@@ -1000,9 +1033,12 @@ void JoypadInputManager::PollLoop()
 					hr = dev->GetDeviceState(sizeof(js), &js);
 					if (FAILED(hr)) {
 						// Disconnection detection is event-driven (WM_DEVICECHANGE).
+						MarkDeviceDisconnected(state);
 						continue;
 					}
+					const bool needs_resync = !state.connected || state.resync_axes;
 					state.connected = true;
+					state.resync_axes = false;
 
 					for (uint32_t i = 0; i < 16; ++i) {
 						if (js.rgbButtons[i] & 0x80) {
@@ -1030,6 +1066,21 @@ void JoypadInputManager::PollLoop()
 					axis_values[5] = std::clamp((double)js.lRz / 1000.0, -1.0, 1.0);
 					axis_values[6] = std::clamp((double)js.rglSlider[0] / 1000.0, -1.0, 1.0);
 					axis_values[7] = std::clamp((double)js.rglSlider[1] / 1000.0, -1.0, 1.0);
+
+					if (needs_resync) {
+						state.last_buttons = buttons;
+						for (int i = 0; i < axes_to_read; ++i) {
+							double normalized = axis_values[(size_t)i];
+							double raw = ((normalized + 1.0) * 0.5) * 1024.0;
+							state.last_axes[i] = raw;
+							state.axis_initialized[i] = true;
+						}
+						for (int i = axes_to_read; i < kMaxTrackedAxes; ++i) {
+							state.axis_initialized[i] = false;
+							state.last_axes[i] = 0.0;
+						}
+						continue;
+					}
 				}
 
 				uint32_t changed = buttons & ~state.last_buttons;

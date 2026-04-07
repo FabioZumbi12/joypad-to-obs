@@ -135,7 +135,7 @@ if(WIN32)
       TARGET ${_name}
       POST_BUILD
       COMMAND ${CMAKE_COMMAND} -E echo "Executando Inno Setup como ${_name}..."
-      COMMAND "${INNO_SETUP_COMPILER}" "${CMAKE_SOURCE_DIR}/setup.iss" "/DBuildConfig=$<CONFIG>" ${INNO_ARGS}
+      COMMAND "${INNO_SETUP_COMPILER}" "${CMAKE_SOURCE_DIR}/setup/setup.iss" "/DBuildConfig=$<CONFIG>" ${INNO_ARGS}
       WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
       COMMENT "Criando instalador ${_name}-Setup.exe (opcional)..."
     )

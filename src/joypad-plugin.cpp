@@ -38,6 +38,8 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <mutex>
+#include <unordered_map>
 #if defined(_WIN32)
 #include <windows.h>
 #endif
@@ -62,6 +64,39 @@ constexpr const char *kDockId = "joypad_to_obs_dock";
 
 QString BuildOsdStyle(const QString &text_color, const QString &background_color, int font_size);
 QString ToCssColor(const QString &input, const QString &fallback);
+
+std::mutex g_absolute_axis_mutex;
+std::unordered_map<std::string, double> g_absolute_axis_last_raw;
+
+std::string BuildAbsoluteAxisKey(const JoypadBinding &binding, const JoypadEvent &event)
+{
+	if (binding.uid > 0) {
+		return std::to_string((long long)binding.uid);
+	}
+	return event.device_id + ":" + std::to_string(event.axis_index) + ":" + binding.source_name;
+}
+
+bool ShouldDispatchAbsoluteAxisValue(const JoypadBinding &binding, const JoypadEvent &event)
+{
+	if (binding.action != JoypadActionType::SetSourceVolumePercent || binding.input_type != JoypadInputType::Axis) {
+		return true;
+	}
+	const std::string key = BuildAbsoluteAxisKey(binding, event);
+	const double raw = event.axis_raw_value;
+	std::lock_guard<std::mutex> lock(g_absolute_axis_mutex);
+	auto it = g_absolute_axis_last_raw.find(key);
+	if (it != g_absolute_axis_last_raw.end() && std::fabs(it->second - raw) < 0.000001) {
+		return false;
+	}
+	g_absolute_axis_last_raw[key] = raw;
+	return true;
+}
+
+void ClearAbsoluteAxisDispatchCache()
+{
+	std::lock_guard<std::mutex> lock(g_absolute_axis_mutex);
+	g_absolute_axis_last_raw.clear();
+}
 
 void *AddObsDockCompat(const char *dock_id, const char *title, void *dock_content_widget, void *legacy_qdock_widget)
 {
@@ -352,6 +387,9 @@ bool obs_module_load(void)
 			return;
 		}
 		for (const auto &binding : matches) {
+			if (!ShouldDispatchAbsoluteAxisValue(binding, event)) {
+				continue;
+			}
 			g_actions.Execute(binding);
 		}
 	});
@@ -410,6 +448,7 @@ void obs_module_unload(void)
 		g_toggle_input_listening_hotkey_id = OBS_INVALID_HOTKEY_ID;
 	}
 	g_config.SetProfileSwitchCallback({});
+	ClearAbsoluteAxisDispatchCache();
 	g_input.SetOnButtonPressed({});
 	g_input.SetOnAxisChanged({});
 	g_input.CancelLearn();
