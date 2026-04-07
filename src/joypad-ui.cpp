@@ -182,6 +182,14 @@ QString action_to_text(JoypadActionType action)
 		return L("JoypadToOBS.Action.ToggleStudioMode");
 	case JoypadActionType::TransitionToProgram:
 		return L("JoypadToOBS.Action.TransitionToProgram");
+	case JoypadActionType::StartReplayBuffer:
+		return L("JoypadToOBS.Action.StartReplayBuffer");
+	case JoypadActionType::StopReplayBuffer:
+		return L("JoypadToOBS.Action.StopReplayBuffer");
+	case JoypadActionType::ToggleReplayBuffer:
+		return L("JoypadToOBS.Action.ToggleReplayBuffer");
+	case JoypadActionType::SaveReplayBuffer:
+		return L("JoypadToOBS.Action.SaveReplayBuffer");
 	case JoypadActionType::SetFilterProperty:
 		return L("JoypadToOBS.Action.SetFilterProperty");
 	case JoypadActionType::AdjustFilterProperty:
@@ -787,6 +795,14 @@ public:
 				       (int)JoypadActionType::ToggleStudioMode);
 		action_combo_->addItem(action_to_text(JoypadActionType::TransitionToProgram),
 				       (int)JoypadActionType::TransitionToProgram);
+		action_combo_->addItem(action_to_text(JoypadActionType::StartReplayBuffer),
+				       (int)JoypadActionType::StartReplayBuffer);
+		action_combo_->addItem(action_to_text(JoypadActionType::StopReplayBuffer),
+				       (int)JoypadActionType::StopReplayBuffer);
+		action_combo_->addItem(action_to_text(JoypadActionType::ToggleReplayBuffer),
+				       (int)JoypadActionType::ToggleReplayBuffer);
+		action_combo_->addItem(action_to_text(JoypadActionType::SaveReplayBuffer),
+				       (int)JoypadActionType::SaveReplayBuffer);
 		action_combo_->addItem(action_to_text(JoypadActionType::Screenshot), (int)JoypadActionType::Screenshot);
 
 		bool_checkbox_ = new QCheckBox(L("JoypadToOBS.Common.Enable"), action_group);

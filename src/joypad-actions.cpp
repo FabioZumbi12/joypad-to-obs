@@ -658,6 +658,28 @@ void JoypadActionEngine::Execute(const JoypadBinding &binding)
 			});
 		}
 		break;
+	case JoypadActionType::StartReplayBuffer:
+		if (!obs_frontend_replay_buffer_active()) {
+			obs_frontend_replay_buffer_start();
+		}
+		break;
+	case JoypadActionType::StopReplayBuffer:
+		if (obs_frontend_replay_buffer_active()) {
+			obs_frontend_replay_buffer_stop();
+		}
+		break;
+	case JoypadActionType::ToggleReplayBuffer:
+		if (obs_frontend_replay_buffer_active()) {
+			obs_frontend_replay_buffer_stop();
+		} else {
+			obs_frontend_replay_buffer_start();
+		}
+		break;
+	case JoypadActionType::SaveReplayBuffer:
+		if (obs_frontend_replay_buffer_active()) {
+			obs_frontend_replay_buffer_save();
+		}
+		break;
 	case JoypadActionType::Screenshot:
 		if (binding.screenshot_target == JoypadScreenshotTarget::Program) {
 			obs_frontend_take_screenshot();

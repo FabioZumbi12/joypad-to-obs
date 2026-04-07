@@ -52,6 +52,10 @@ enum class JoypadActionType {
 	AdjustFilterProperty = 21,
 	SourceTransform = 22,
 	Screenshot = 23,
+	StartReplayBuffer = 24,
+	StopReplayBuffer = 25,
+	ToggleReplayBuffer = 26,
+	SaveReplayBuffer = 27,
 };
 
 enum class JoypadInputType {
