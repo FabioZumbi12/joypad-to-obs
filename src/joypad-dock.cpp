@@ -39,6 +39,8 @@ inline QString L(const char *key)
 }
 } // namespace
 
+void JoypadPluginOpenToolsDialog();
+
 JoypadControlDock::JoypadControlDock(QWidget *parent, JoypadConfigStore *config) : QDockWidget(parent), config_(config)
 {
 	setObjectName(QStringLiteral("joypad_to_obs_dock"));
@@ -61,6 +63,14 @@ JoypadControlDock::JoypadControlDock(QWidget *parent, JoypadConfigStore *config)
 	profile_combo_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
 	profile_row->addWidget(profile_combo_, 2);
 
+	open_config_button_ = new QPushButton(content);
+	open_config_button_->setText(QString());
+	open_config_button_->setFixedWidth(34);
+	open_config_button_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
+	open_config_button_->setIcon(style()->standardIcon(QStyle::SP_FileDialogDetailedView));
+	open_config_button_->setToolTip(L("JoypadToOBS.Dock.OpenConfig"));
+	profile_row->addWidget(open_config_button_, 0);
+
 	input_toggle_button_ = new QPushButton(content);
 	input_toggle_button_->setCheckable(true);
 	input_toggle_button_->setText(QString());
@@ -80,6 +90,7 @@ JoypadControlDock::JoypadControlDock(QWidget *parent, JoypadConfigStore *config)
 	});
 	connect(input_toggle_button_, &QPushButton::toggled, this,
 		[](bool enabled) { JoypadUiSetInputListeningEnabled(enabled); });
+	connect(open_config_button_, &QPushButton::clicked, this, []() { JoypadPluginOpenToolsDialog(); });
 
 	update_timer_ = new QTimer(this);
 	connect(update_timer_, &QTimer::timeout, this, [this]() { RefreshState(); });

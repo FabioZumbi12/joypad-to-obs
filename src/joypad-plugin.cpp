@@ -340,6 +340,20 @@ static void save_hotkeys(obs_data_t *save_data, bool saving, void *private_data)
 }
 } // namespace
 
+void JoypadPluginOpenToolsDialog()
+{
+	if (g_unloading.load(std::memory_order_acquire)) {
+		return;
+	}
+	if (!g_dialog) {
+		auto *parent = reinterpret_cast<QWidget *>(obs_frontend_get_main_window());
+		g_dialog = new JoypadToolsDialog(parent, &g_config, &g_input);
+	}
+	g_dialog->show();
+	g_dialog->raise();
+	g_dialog->activateWindow();
+}
+
 bool obs_module_load(void)
 {
 	obs_log(LOG_INFO, "joypad-to-obs loaded (version %s)", PLUGIN_VERSION);
@@ -364,7 +378,7 @@ bool obs_module_load(void)
 		if (JoypadUiIsBindingDialogOpen() || !JoypadUiIsInputListeningEnabled()) {
 			return;
 		}
-		auto matches = g_config.FindMatchingBindings(event);
+		auto matches = g_config.FindMatchingBindings(event, &g_input);
 		for (const auto &binding : matches) {
 			g_actions.Execute(binding);
 		}
@@ -382,7 +396,7 @@ bool obs_module_load(void)
 		if (!event.is_axis) {
 			return;
 		}
-		auto matches = g_config.FindMatchingBindings(event);
+		auto matches = g_config.FindMatchingBindings(event, &g_input);
 		if (matches.empty()) {
 			return;
 		}
@@ -411,18 +425,7 @@ bool obs_module_load(void)
 
 	g_tools_action = reinterpret_cast<QAction *>(
 		obs_frontend_add_tools_menu_qaction(obs_module_text("JoypadToOBS.MenuTitle")));
-	QObject::connect(g_tools_action, &QAction::triggered, []() {
-		if (g_unloading.load(std::memory_order_acquire)) {
-			return;
-		}
-		if (!g_dialog) {
-			auto *parent = reinterpret_cast<QWidget *>(obs_frontend_get_main_window());
-			g_dialog = new JoypadToolsDialog(parent, &g_config, &g_input);
-		}
-		g_dialog->show();
-		g_dialog->raise();
-		g_dialog->activateWindow();
-	});
+	QObject::connect(g_tools_action, &QAction::triggered, []() { JoypadPluginOpenToolsDialog(); });
 
 	auto *main_window = reinterpret_cast<QWidget *>(obs_frontend_get_main_window());
 	if (main_window) {

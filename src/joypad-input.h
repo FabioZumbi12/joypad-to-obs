@@ -51,6 +51,8 @@ public:
 	int AddOnAxisChanged(std::function<void(const JoypadEvent &)> handler);
 	void RemoveOnAxisChanged(int handler_id);
 	bool GetAxisRawValue(const std::string &device_id, int axis_index, double &raw_out) const;
+	bool IsButtonPressed(const std::string &device_id, const std::string &device_stable_id,
+			     const std::string &device_type_id, int button) const;
 	void SetNativeWindowHandle(void *hwnd);
 
 	bool BeginLearn(std::function<void(const JoypadEvent &)> handler);

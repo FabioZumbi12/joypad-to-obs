@@ -107,6 +107,14 @@ enum class JoypadScreenshotTarget {
 	Source = 1,
 };
 
+struct JoypadButtonComboEntry {
+	std::string device_id;
+	std::string device_stable_id;
+	std::string device_type_id;
+	std::string device_name;
+	int button = -1;
+};
+
 struct JoypadBinding {
 	int64_t uid = 0;
 	std::string device_id;
@@ -114,6 +122,7 @@ struct JoypadBinding {
 	std::string device_type_id;
 	std::string device_name;
 	int button = -1;
+	std::vector<JoypadButtonComboEntry> button_combo;
 	JoypadInputType input_type = JoypadInputType::Button;
 	int axis_index = -1;
 	JoypadAxisDirection axis_direction = JoypadAxisDirection::Both;
@@ -163,6 +172,8 @@ struct JoypadEvent {
 	double axis_raw_value = 0.0;
 };
 
+class JoypadInputManager;
+
 struct JoypadProfile {
 	std::string name;
 	std::string comment;
@@ -187,7 +198,8 @@ public:
 	void ClearCurrentProfileBindings();
 
 	std::vector<JoypadBinding> GetBindingsSnapshot() const;
-	std::vector<JoypadBinding> FindMatchingBindings(const JoypadEvent &event) const;
+	std::vector<JoypadBinding> FindMatchingBindings(const JoypadEvent &event,
+							const JoypadInputManager *input = nullptr) const;
 	void SwitchProfileByHotkey(obs_hotkey_id id);
 
 	// Profile Management
@@ -223,6 +235,7 @@ private:
 	mutable std::mutex mutex_;
 	std::atomic<bool> dirty_{false};
 	mutable std::unordered_map<std::string, bool> axis_active_;
+	mutable std::unordered_map<std::string, std::chrono::steady_clock::time_point> button_combo_last_dispatch_;
 	mutable std::unordered_map<std::string, std::chrono::steady_clock::time_point> axis_last_dispatch_;
 	std::string last_file_path_;
 	ProfileSwitchCallback on_profile_switch_;

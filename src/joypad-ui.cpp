@@ -29,12 +29,15 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
+#include <QFrame>
 #include <QGroupBox>
 #include <QHeaderView>
 #include <QLabel>
 #include <QLayout>
 #include <QGridLayout>
 #include <QHBoxLayout>
+#include <QListWidget>
+#include <QStringList>
 #include <QVBoxLayout>
 #include <QToolButton>
 #include <QPlainTextEdit>
@@ -79,6 +82,7 @@ struct DialogTestState {
 std::mutex g_dialog_test_mutex;
 DialogTestState g_dialog_test_state;
 std::unordered_map<std::string, std::chrono::steady_clock::time_point> g_dialog_axis_last_dispatch;
+constexpr double kLearnAxisDeadzone = 0.65;
 
 inline QString L(const char *key)
 {
@@ -132,11 +136,36 @@ QString device_label_from_info(const JoypadDeviceInfo &device)
 
 QString device_label_from_binding(const JoypadBinding &binding)
 {
+	if (binding.input_type == JoypadInputType::Button && !binding.button_combo.empty()) {
+		if (binding.button_combo.size() > 1) {
+			return L("JoypadToOBS.Common.MultipleDevices");
+		}
+		const auto &entry = binding.button_combo.front();
+		if (entry.device_id.empty()) {
+			return L("JoypadToOBS.Common.Any");
+		}
+		return format_device_label(QString::fromStdString(entry.device_name),
+					   QString::fromStdString(entry.device_type_id));
+	}
 	if (binding.device_id.empty()) {
 		return L("JoypadToOBS.Common.Any");
 	}
 	return format_device_label(QString::fromStdString(binding.device_name),
 				   QString::fromStdString(binding.device_type_id));
+}
+
+QString combo_entry_to_text(const JoypadButtonComboEntry &entry)
+{
+	const QString device = entry.device_id.empty()
+				       ? L("JoypadToOBS.Common.Any")
+				       : format_device_label(QString::fromStdString(entry.device_name),
+							     QString::fromStdString(entry.device_type_id));
+	return QStringLiteral("%1: %2").arg(device, L("JoypadToOBS.Common.ButtonNumber").arg(entry.button));
+}
+
+QString add_listen_button_text()
+{
+	return QStringLiteral("+ %1").arg(L("JoypadToOBS.Common.Listen"));
 }
 
 QString action_to_text(JoypadActionType action)
@@ -560,6 +589,13 @@ QString input_label_from_binding(const JoypadBinding &binding)
 		}
 		return L("JoypadToOBS.Common.AxisNumber").arg(binding.axis_index + 1).arg(dir);
 	}
+	if (!binding.button_combo.empty()) {
+		QStringList parts;
+		for (const auto &entry : binding.button_combo) {
+			parts.push_back(combo_entry_to_text(entry));
+		}
+		return parts.join(QStringLiteral(" + "));
+	}
 	return L("JoypadToOBS.Common.ButtonNumber").arg(binding.button);
 }
 
@@ -611,28 +647,58 @@ public:
 		g_binding_dialog_open_count.fetch_add(1, std::memory_order_relaxed);
 		setWindowTitle(L("JoypadToOBS.Dialog.AddTitle"));
 		setModal(true);
+		setSizeGripEnabled(true);
 
 		auto *layout = new QVBoxLayout(this);
-		layout->setSizeConstraint(QLayout::SetFixedSize);
+		layout->setSizeConstraint(QLayout::SetDefaultConstraint);
+		layout->setContentsMargins(10, 8, 10, 10);
+		layout->setSpacing(8);
 
 		auto *description = new QLabel(L("JoypadToOBS.Dialog.AddDescription"), this);
 		description->setWordWrap(true);
+		description->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
 		layout->addWidget(description);
 
 		auto *device_group = new QGroupBox(L("JoypadToOBS.Group.DeviceButton"));
+		device_group->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
 		auto *device_layout = new QGridLayout(device_group);
+		device_layout->setContentsMargins(8, 8, 8, 8);
+		device_layout->setHorizontalSpacing(6);
+		device_layout->setVerticalSpacing(4);
 
 		device_combo_ = new QComboBox(device_group);
 		PopulateDeviceCombo();
+		device_combo_->hide();
 
+		axis_name_label_ = new QLabel(L("JoypadToOBS.Field.Axis"), device_group);
 		button_label_ = new QLabel(L("JoypadToOBS.Common.NoButtonSelected"), device_group);
-		listen_button_ = new QPushButton(L("JoypadToOBS.Common.Listen"), device_group);
+		listen_button_ = new QPushButton(add_listen_button_text(), device_group);
+		button_combo_frame_ = new QFrame(device_group);
+		button_combo_frame_->setFrameShape(QFrame::StyledPanel);
+		button_combo_frame_->setFrameShadow(QFrame::Sunken);
+		button_combo_frame_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
+		auto *button_combo_layout = new QVBoxLayout(button_combo_frame_);
+		button_combo_layout->setContentsMargins(6, 6, 6, 6);
+		button_combo_layout->setSpacing(0);
+		button_combo_list_ = new QListWidget(button_combo_frame_);
+		button_combo_list_->setSelectionMode(QAbstractItemView::NoSelection);
+		button_combo_list_->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+		button_combo_list_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+		button_combo_list_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+		button_combo_layout->addWidget(button_combo_list_);
+		clear_combo_button_ = new QPushButton(L("JoypadToOBS.Button.ClearButtons"), device_group);
+		device_hint_label_ = new QLabel(L("JoypadToOBS.DeviceHint.ComboButtonsOnly"), device_group);
+		device_hint_label_->setWordWrap(true);
+		device_hint_label_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
 
-		device_layout->addWidget(new QLabel(L("JoypadToOBS.Field.Device")), 0, 0);
-		device_layout->addWidget(device_combo_, 0, 1);
-		device_layout->addWidget(new QLabel(L("JoypadToOBS.Field.Button")), 1, 0);
-		device_layout->addWidget(button_label_, 1, 1);
-		device_layout->addWidget(listen_button_, 1, 2);
+		axis_name_label_->hide();
+		button_label_->hide();
+		device_layout->addWidget(device_hint_label_, 0, 0, 1, 3);
+		device_layout->addWidget(button_combo_frame_, 1, 0, 1, 3);
+		device_layout->addWidget(listen_button_, 2, 0);
+		device_layout->addWidget(clear_combo_button_, 2, 2);
+		device_layout->addWidget(axis_name_label_, 3, 0);
+		device_layout->addWidget(button_label_, 3, 1, 1, 2);
 
 		axis_value_label_ = new QLabel(L("JoypadToOBS.Field.AxisValue"), device_group);
 		axis_value_slider_ = new QSlider(Qt::Horizontal, device_group);
@@ -670,25 +736,29 @@ public:
 		axis_min_label_->setText(L("JoypadToOBS.Field.AxisMinValue") + ": 0");
 		axis_max_label_->setText(L("JoypadToOBS.Field.AxisMaxValue") + ": 1024");
 
-		device_layout->addWidget(axis_value_label_, 2, 0);
-		device_layout->addWidget(axis_value_slider_, 2, 1);
-		device_layout->addWidget(axis_live_value_label_, 2, 2);
-		device_layout->addWidget(axis_threshold_label_, 3, 0);
-		device_layout->addWidget(axis_threshold_spin_, 3, 1, 1, 2);
-		device_layout->addWidget(axis_min_per_second_label_, 4, 0);
-		device_layout->addWidget(axis_min_per_second_spin_, 4, 1, 1, 2);
-		device_layout->addWidget(axis_max_per_second_label_, 5, 0);
-		device_layout->addWidget(axis_max_per_second_spin_, 5, 1, 1, 2);
-		device_layout->addWidget(axis_both_checkbox_, 6, 0, 1, 2);
-		device_layout->addWidget(axis_min_label_, 7, 0);
-		device_layout->addWidget(axis_set_min_button_, 7, 1);
-		device_layout->addWidget(axis_max_label_, 8, 0);
-		device_layout->addWidget(axis_set_max_button_, 8, 1);
+		device_layout->addWidget(axis_value_label_, 4, 0);
+		device_layout->addWidget(axis_value_slider_, 4, 1);
+		device_layout->addWidget(axis_live_value_label_, 4, 2);
+		device_layout->addWidget(axis_threshold_label_, 5, 0);
+		device_layout->addWidget(axis_threshold_spin_, 5, 1, 1, 2);
+		device_layout->addWidget(axis_min_per_second_label_, 6, 0);
+		device_layout->addWidget(axis_min_per_second_spin_, 6, 1, 1, 2);
+		device_layout->addWidget(axis_max_per_second_label_, 7, 0);
+		device_layout->addWidget(axis_max_per_second_spin_, 7, 1, 1, 2);
+		device_layout->addWidget(axis_both_checkbox_, 8, 0, 1, 2);
+		device_layout->addWidget(axis_min_label_, 9, 0);
+		device_layout->addWidget(axis_set_min_button_, 9, 1);
+		device_layout->addWidget(axis_max_label_, 10, 0);
+		device_layout->addWidget(axis_set_max_button_, 10, 1);
 
 		layout->addWidget(device_group);
 
 		auto *target_group = new QGroupBox(L("JoypadToOBS.Group.Target"));
+		target_group->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
 		auto *target_layout = new QGridLayout(target_group);
+		target_layout->setContentsMargins(8, 8, 8, 8);
+		target_layout->setHorizontalSpacing(6);
+		target_layout->setVerticalSpacing(4);
 
 		use_current_scene_ = new QCheckBox(L("JoypadToOBS.Field.UseCurrentScene"), target_group);
 		scene_combo_ = new QComboBox(target_group);
@@ -748,7 +818,11 @@ public:
 		target_layout->addWidget(transform_op_combo_, 5, 1);
 
 		auto *action_group = new QGroupBox(L("JoypadToOBS.Group.Action"));
+		action_group->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
 		auto *action_layout = new QGridLayout(action_group);
+		action_layout->setContentsMargins(8, 8, 8, 8);
+		action_layout->setHorizontalSpacing(6);
+		action_layout->setVerticalSpacing(4);
 
 		action_combo_ = new QComboBox(action_group);
 		action_combo_->addItem(action_to_text(JoypadActionType::SwitchScene),
@@ -839,6 +913,7 @@ public:
 
 		layout->addWidget(action_group);
 		layout->addWidget(target_group);
+		layout->addStretch(1);
 
 		auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
 		layout->addWidget(buttons);
@@ -847,6 +922,12 @@ public:
 		connect(buttons, &QDialogButtonBox::rejected, this, &JoypadBindingDialog::reject);
 		connect(test_mode_checkbox_, &QCheckBox::toggled, this, [this](bool) { PublishTestBinding(); });
 		connect(listen_button_, &QPushButton::clicked, this, &JoypadBindingDialog::OnListen);
+		connect(clear_combo_button_, &QPushButton::clicked, this, [this]() {
+			binding_.button_combo.clear();
+			learned_event_ = JoypadEvent{};
+			UpdateButtonComboUi();
+			DisableTestModeOnConfigChange();
+		});
 		connect(action_combo_, &QComboBox::currentIndexChanged, this, &JoypadBindingDialog::UpdateActionUi);
 		connect(action_combo_, &QComboBox::currentIndexChanged, this,
 			[this](int) { DisableTestModeOnConfigChange(); });
@@ -1007,6 +1088,7 @@ public:
 			ApplyBinding(*existing);
 		} else {
 			binding_.enabled = true;
+			UpdateButtonComboUi();
 			UpdateActionUi();
 			UpdateAxisUi(false);
 		}
@@ -1167,6 +1249,7 @@ private:
 		axis_value_label_->setVisible(visible);
 		axis_value_slider_->setVisible(visible);
 		axis_live_value_label_->setVisible(visible);
+		axis_name_label_->setVisible(visible);
 		axis_threshold_label_->setVisible(visible && !hide_axis_options);
 		axis_threshold_spin_->setVisible(visible && !hide_axis_options);
 		axis_min_per_second_label_->setVisible(visible && !hide_axis_options);
@@ -1179,15 +1262,90 @@ private:
 		axis_max_label_->setVisible(visible && hide_axis_options);
 		axis_set_min_button_->setVisible(visible && hide_axis_options);
 		axis_set_max_button_->setVisible(visible && hide_axis_options);
+		button_label_->setVisible(visible);
+		button_combo_frame_->setVisible(!visible);
+		button_combo_list_->setVisible(!visible);
+		clear_combo_button_->setVisible(!visible);
 		if (QLayout *lyt = layout()) {
 			lyt->activate();
 		}
 		adjustSize();
 	}
 
+	void UpdateButtonComboUi()
+	{
+		button_combo_list_->clear();
+		for (size_t i = 0; i < binding_.button_combo.size(); ++i) {
+			const auto &entry = binding_.button_combo[i];
+			auto *item = new QListWidgetItem(button_combo_list_);
+			auto *row_widget = new QWidget(button_combo_list_);
+			auto *row_layout = new QHBoxLayout(row_widget);
+			row_layout->setContentsMargins(4, 2, 4, 2);
+			row_layout->setSpacing(6);
+
+			auto *label = new QLabel(combo_entry_to_text(entry), row_widget);
+			label->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+			auto *remove_button = new QToolButton(row_widget);
+			remove_button->setText("X");
+			remove_button->setAutoRaise(true);
+			remove_button->setToolTip(L("JoypadToOBS.Button.RemoveSelected"));
+			connect(remove_button, &QToolButton::clicked, this, [this, i]() {
+				if (i >= binding_.button_combo.size()) {
+					return;
+				}
+				binding_.button_combo.erase(binding_.button_combo.begin() + (ptrdiff_t)i);
+				if (binding_.button_combo.empty()) {
+					learned_event_ = JoypadEvent{};
+				}
+				UpdateButtonComboUi();
+				DisableTestModeOnConfigChange();
+			});
+
+			row_layout->addWidget(label);
+			row_layout->addWidget(remove_button, 0, Qt::AlignTop);
+			item->setSizeHint(row_widget->sizeHint());
+			button_combo_list_->addItem(item);
+			button_combo_list_->setItemWidget(item, row_widget);
+		}
+		int row_height = button_combo_list_->count() > 0 ? button_combo_list_->sizeHintForRow(0) : 0;
+		if (row_height <= 0) {
+			row_height = button_combo_list_->fontMetrics().height() + 8;
+		}
+		const int visible_rows = std::clamp((int)binding_.button_combo.size(), 1, 5);
+		const int frame = button_combo_list_->frameWidth() * 2;
+		const int padding = 4;
+		const int target_height = frame + (row_height * visible_rows) + padding;
+		button_combo_list_->setMinimumHeight(target_height);
+		button_combo_list_->setMaximumHeight(target_height);
+		clear_combo_button_->setEnabled(!binding_.button_combo.empty());
+		if (learned_event_.is_axis) {
+			button_label_->setText(input_label_from_event(learned_event_));
+			return;
+		}
+		if (!binding_.button_combo.empty()) {
+			button_label_->setText(input_label_from_binding(binding_));
+			return;
+		}
+		if (learned_event_.button > 0) {
+			button_label_->setText(input_label_from_event(learned_event_));
+			return;
+		}
+		button_label_->setText(L("JoypadToOBS.Common.NoButtonSelected"));
+	}
+
 	void ApplyBinding(const JoypadBinding &binding)
 	{
 		binding_ = binding;
+		if (binding_.input_type == JoypadInputType::Button && binding_.button_combo.empty() &&
+		    binding_.button > 0) {
+			JoypadButtonComboEntry entry;
+			entry.device_id = binding_.device_id;
+			entry.device_stable_id = binding_.device_stable_id;
+			entry.device_type_id = binding_.device_type_id;
+			entry.device_name = binding_.device_name;
+			entry.button = binding_.button;
+			binding_.button_combo.push_back(std::move(entry));
+		}
 		learned_event_.button = binding.button;
 		learned_event_.is_axis = (binding.input_type == JoypadInputType::Axis);
 		learned_event_.axis_index = binding.axis_index;
@@ -1198,7 +1356,7 @@ private:
 		learned_event_.device_stable_id = binding.device_stable_id;
 		learned_event_.device_type_id = binding.device_type_id;
 		learned_event_.device_name = binding.device_name;
-		button_label_->setText(input_label_from_event(learned_event_));
+		UpdateButtonComboUi();
 		UpdateAxisUi(learned_event_.is_axis);
 		if (learned_event_.is_axis) {
 			last_axis_value_ = binding.axis_min_value;
@@ -1696,12 +1854,16 @@ private:
 		if (is_listening_) {
 			input_->CancelLearn();
 			is_listening_ = false;
-			listen_button_->setText(L("JoypadToOBS.Common.Listen"));
-			if (learned_event_.button > 0 || learned_event_.is_axis) {
-				button_label_->setText(input_label_from_event(learned_event_));
-			} else {
-				button_label_->setText(L("JoypadToOBS.Common.NoButtonSelected"));
-			}
+			listen_button_->setText(add_listen_button_text());
+			UpdateButtonComboUi();
+			return;
+		}
+		BeginListenCapture();
+	}
+
+	void BeginListenCapture()
+	{
+		if (!input_) {
 			return;
 		}
 		button_label_->setText(L("JoypadToOBS.Common.PressButtonOrAxis"));
@@ -1709,60 +1871,75 @@ private:
 			QMetaObject::invokeMethod(
 				this,
 				[this, event]() {
-					QString conflicts;
-					auto bindings = config_->GetBindingsSnapshot();
-					for (const auto &b : bindings) {
-						const bool same_device =
-							(!b.device_id.empty() && b.device_id == event.device_id) ||
-							(!b.device_stable_id.empty() &&
-							 b.device_stable_id == event.device_stable_id) ||
-							(!b.device_type_id.empty() &&
-							 b.device_type_id == event.device_type_id);
-						bool match = false;
-						if (event.is_axis) {
-							if (b.input_type == JoypadInputType::Axis && same_device &&
-							    b.axis_index == event.axis_index) {
-								match = true;
-							}
-						} else {
-							if (b.input_type == JoypadInputType::Button && same_device &&
-							    b.button == event.button) {
-								match = true;
-							}
+					if (event.is_axis) {
+						if (!binding_.button_combo.empty()) {
+							BeginListenCapture();
+							return;
 						}
-
-						if (match) {
-							if (existing_ && b.uid == existing_->uid) {
-								continue;
-							}
-							QString actionName = action_to_text(b.action);
-							QString target;
-							if (!b.scene_name.empty())
-								target = QString::fromStdString(b.scene_name);
-							else if (!b.source_name.empty())
-								target = QString::fromStdString(b.source_name);
-							conflicts += QStringLiteral("\u2022 %1 (%2)\n")
-									     .arg(actionName, target);
-						}
-					}
-
-					if (!conflicts.isEmpty()) {
-						QMessageBox::StandardButton reply;
-						reply = QMessageBox::warning(
-							this, L("JoypadToOBS.Dialog.ConflictTitle"),
-							L("JoypadToOBS.Dialog.ConflictMessage").arg(conflicts),
-							QMessageBox::Yes | QMessageBox::No);
-						if (reply == QMessageBox::No) {
+						if (std::fabs(event.axis_value) < kLearnAxisDeadzone) {
+							BeginListenCapture();
 							return;
 						}
 					}
 
+					QString conflicts;
+					const bool check_conflicts = event.is_axis || binding_.button_combo.empty();
+					if (check_conflicts) {
+						auto bindings = config_->GetBindingsSnapshot();
+						for (const auto &b : bindings) {
+							const bool same_device =
+								(!b.device_id.empty() &&
+								 b.device_id == event.device_id) ||
+								(!b.device_stable_id.empty() &&
+								 b.device_stable_id == event.device_stable_id) ||
+								(!b.device_type_id.empty() &&
+								 b.device_type_id == event.device_type_id);
+							bool match = false;
+							if (event.is_axis) {
+								if (b.input_type == JoypadInputType::Axis &&
+								    same_device && b.axis_index == event.axis_index) {
+									match = true;
+								}
+							} else {
+								if (b.input_type == JoypadInputType::Button &&
+								    same_device && b.button == event.button) {
+									match = true;
+								}
+							}
+
+							if (match) {
+								if (existing_ && b.uid == existing_->uid) {
+									continue;
+								}
+								QString actionName = action_to_text(b.action);
+								QString target;
+								if (!b.scene_name.empty())
+									target = QString::fromStdString(b.scene_name);
+								else if (!b.source_name.empty())
+									target = QString::fromStdString(b.source_name);
+								conflicts += QStringLiteral("\u2022 %1 (%2)\n")
+										     .arg(actionName, target);
+							}
+						}
+
+						if (!conflicts.isEmpty()) {
+							QMessageBox::StandardButton reply;
+							reply = QMessageBox::warning(
+								this, L("JoypadToOBS.Dialog.ConflictTitle"),
+								L("JoypadToOBS.Dialog.ConflictMessage").arg(conflicts),
+								QMessageBox::Yes | QMessageBox::No);
+							if (reply == QMessageBox::No) {
+								return;
+							}
+						}
+					}
+
 					is_listening_ = false;
-					listen_button_->setText(L("JoypadToOBS.Common.Listen"));
+					listen_button_->setText(add_listen_button_text());
 					learned_event_ = event;
-					button_label_->setText(input_label_from_event(event));
-					UpdateAxisUi(event.is_axis);
 					if (event.is_axis) {
+						binding_.button_combo.clear();
+						UpdateAxisUi(true);
 						last_axis_value_ = event.axis_raw_value;
 						if (CurrentAction() == JoypadActionType::SetSourceVolumePercent) {
 							double percent = MapRawToPercent(event.axis_raw_value);
@@ -1794,15 +1971,43 @@ private:
 							axis_live_value_label_->setText(
 								QString::number(last_axis_value_, 'f', 2));
 						}
+					} else {
+						UpdateAxisUi(false);
+						bool exists = false;
+						for (const auto &entry : binding_.button_combo) {
+							const bool same_button = entry.button == event.button;
+							const bool same_id = !entry.device_id.empty() &&
+									     entry.device_id == event.device_id;
+							const bool same_stable = !entry.device_stable_id.empty() &&
+										 entry.device_stable_id ==
+											 event.device_stable_id;
+							const bool same_type = !entry.device_type_id.empty() &&
+									       entry.device_type_id ==
+										       event.device_type_id;
+							if (same_button && (same_id || same_stable || same_type)) {
+								exists = true;
+								break;
+							}
+						}
+						if (!exists) {
+							JoypadButtonComboEntry entry;
+							entry.device_id = event.device_id;
+							entry.device_stable_id = event.device_stable_id;
+							entry.device_type_id = event.device_type_id;
+							entry.device_name = event.device_name;
+							entry.button = event.button;
+							binding_.button_combo.push_back(std::move(entry));
+						}
 					}
 					SelectDevice(event);
+					UpdateButtonComboUi();
 					DisableTestModeOnConfigChange();
 				},
 				Qt::QueuedConnection);
 		});
 		if (ok) {
 			is_listening_ = true;
-			listen_button_->setText(L("JoypadToOBS.Common.Listen") + "...");
+			listen_button_->setText(add_listen_button_text() + "...");
 		} else {
 			button_label_->setText(L("JoypadToOBS.Common.AlreadyListening"));
 		}
@@ -1826,16 +2031,11 @@ private:
 
 	bool ReadBinding(bool require_input)
 	{
-		if (require_input && !learned_event_.is_axis && learned_event_.button <= 0) {
+		if (require_input && !learned_event_.is_axis && binding_.button_combo.empty() &&
+		    learned_event_.button <= 0) {
 			button_label_->setText(L("JoypadToOBS.Common.PressButtonOrAxisFirst"));
 			return false;
 		}
-
-		binding_.button = learned_event_.button;
-		binding_.device_id = device_combo_->currentData(kDeviceIdRole).toString().toStdString();
-		binding_.device_stable_id = device_combo_->currentData(kDeviceStableIdRole).toString().toStdString();
-		binding_.device_type_id = device_combo_->currentData(kDeviceTypeIdRole).toString().toStdString();
-		binding_.device_name = device_combo_->currentText().toStdString();
 
 		if (require_input && CurrentAction() == JoypadActionType::SetSourceVolumePercent &&
 		    !learned_event_.is_axis) {
@@ -1844,6 +2044,14 @@ private:
 		}
 
 		if (learned_event_.is_axis) {
+			binding_.button_combo.clear();
+			binding_.button = -1;
+			binding_.device_id = device_combo_->currentData(kDeviceIdRole).toString().toStdString();
+			binding_.device_stable_id =
+				device_combo_->currentData(kDeviceStableIdRole).toString().toStdString();
+			binding_.device_type_id =
+				device_combo_->currentData(kDeviceTypeIdRole).toString().toStdString();
+			binding_.device_name = device_combo_->currentText().toStdString();
 			binding_.input_type = JoypadInputType::Axis;
 			binding_.axis_index = learned_event_.axis_index;
 			binding_.axis_inverted = invert_axis_checkbox_->isChecked();
@@ -1866,6 +2074,33 @@ private:
 			binding_.axis_min_value = binding_.axis_min_value;
 			binding_.axis_max_value = binding_.axis_max_value;
 		} else {
+			if (binding_.button_combo.empty() && learned_event_.button > 0) {
+				JoypadButtonComboEntry entry;
+				entry.device_id = device_combo_->currentData(kDeviceIdRole).toString().toStdString();
+				entry.device_stable_id =
+					device_combo_->currentData(kDeviceStableIdRole).toString().toStdString();
+				entry.device_type_id =
+					device_combo_->currentData(kDeviceTypeIdRole).toString().toStdString();
+				entry.device_name = device_combo_->currentText().toStdString();
+				entry.button = learned_event_.button;
+				binding_.button_combo.push_back(std::move(entry));
+			}
+			if (!binding_.button_combo.empty()) {
+				const auto &primary = binding_.button_combo.front();
+				binding_.button = primary.button;
+				binding_.device_id = primary.device_id;
+				binding_.device_stable_id = primary.device_stable_id;
+				binding_.device_type_id = primary.device_type_id;
+				binding_.device_name = primary.device_name;
+			} else {
+				binding_.button = learned_event_.button;
+				binding_.device_id = device_combo_->currentData(kDeviceIdRole).toString().toStdString();
+				binding_.device_stable_id =
+					device_combo_->currentData(kDeviceStableIdRole).toString().toStdString();
+				binding_.device_type_id =
+					device_combo_->currentData(kDeviceTypeIdRole).toString().toStdString();
+				binding_.device_name = device_combo_->currentText().toStdString();
+			}
 			binding_.input_type = JoypadInputType::Button;
 			binding_.axis_index = -1;
 			binding_.axis_inverted = false;
@@ -1944,6 +2179,9 @@ private:
 			binding_.axis_max_per_second = 20.0;
 			binding_.axis_min_value = 0.0;
 			binding_.axis_max_value = 1024.0;
+		}
+		if (binding_.input_type != JoypadInputType::Button) {
+			binding_.button_combo.clear();
 		}
 
 		bool needs_scene = (binding_.action == JoypadActionType::SwitchScene) ||
@@ -2045,8 +2283,13 @@ private:
 	JoypadEvent learned_event_;
 
 	QComboBox *device_combo_ = nullptr;
+	QLabel *axis_name_label_ = nullptr;
 	QLabel *button_label_ = nullptr;
 	QPushButton *listen_button_ = nullptr;
+	QFrame *button_combo_frame_ = nullptr;
+	QListWidget *button_combo_list_ = nullptr;
+	QPushButton *clear_combo_button_ = nullptr;
+	QLabel *device_hint_label_ = nullptr;
 	QLabel *axis_value_label_ = nullptr;
 	QSlider *axis_value_slider_ = nullptr;
 	QLabel *axis_threshold_label_ = nullptr;
@@ -2137,7 +2380,24 @@ bool JoypadUiEmulateBindingDialogAction(const JoypadEvent &event, JoypadActionEn
 		if (event.is_axis) {
 			return true;
 		}
-		if (binding.button > 0 && event.button != binding.button) {
+		if (!binding.button_combo.empty()) {
+			bool matched_combo_button = false;
+			for (const auto &entry : binding.button_combo) {
+				const bool same_button = entry.button == event.button;
+				const bool same_id = !entry.device_id.empty() && entry.device_id == event.device_id;
+				const bool same_stable = !entry.device_stable_id.empty() &&
+							 entry.device_stable_id == event.device_stable_id;
+				const bool same_type = !entry.device_type_id.empty() &&
+						       entry.device_type_id == event.device_type_id;
+				if (same_button && (same_id || same_stable || same_type)) {
+					matched_combo_button = true;
+					break;
+				}
+			}
+			if (!matched_combo_button) {
+				return true;
+			}
+		} else if (binding.button > 0 && event.button != binding.button) {
 			return true;
 		}
 		actions->Execute(adjusted);

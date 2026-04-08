@@ -947,6 +947,28 @@ bool JoypadInputManager::GetAxisRawValue(const std::string &device_id, int axis_
 	return false;
 }
 
+bool JoypadInputManager::IsButtonPressed(const std::string &device_id, const std::string &device_stable_id,
+					 const std::string &device_type_id, int button) const
+{
+	if (button <= 0 || button > 32) {
+		return false;
+	}
+
+	const uint32_t mask = 1u << (uint32_t)(button - 1);
+	std::lock_guard<std::mutex> lock(devices_mutex_);
+	for (const auto &state : device_states_) {
+		const bool same_id = !device_id.empty() && state.id == device_id;
+		const bool same_stable = !device_stable_id.empty() && state.stable_id == device_stable_id;
+		const bool same_type = !device_type_id.empty() && state.type_id == device_type_id;
+		const bool any_device = device_id.empty() && device_stable_id.empty() && device_type_id.empty();
+		if (!same_id && !same_stable && !same_type && !any_device) {
+			continue;
+		}
+		return (state.last_buttons & mask) != 0;
+	}
+	return false;
+}
+
 bool JoypadInputManager::BeginLearn(std::function<void(const JoypadEvent &)> handler)
 {
 	std::lock_guard<std::mutex> lock(handler_mutex_);

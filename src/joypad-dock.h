@@ -36,6 +36,7 @@ private:
 
 	JoypadConfigStore *config_ = nullptr;
 	QComboBox *profile_combo_ = nullptr;
+	QPushButton *open_config_button_ = nullptr;
 	QPushButton *input_toggle_button_ = nullptr;
 	QTimer *update_timer_ = nullptr;
 };

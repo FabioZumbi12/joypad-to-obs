@@ -17,6 +17,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 */
 
 #include "joypad-config.h"
+#include "joypad-input.h"
 
 #include <obs-module.h>
 #include <obs-properties.h>
@@ -61,6 +62,114 @@ bool is_xbox_like(const std::string &device_id, const std::string &device_type_i
 		return true;
 	}
 	return false;
+}
+
+bool device_matches_input(const std::string &binding_device_id, const std::string &binding_device_stable_id,
+			  const std::string &binding_device_type_id, const std::string &binding_device_name,
+			  const std::string &event_device_id, const std::string &event_device_stable_id,
+			  const std::string &event_device_type_id, const std::string &event_device_name)
+{
+	bool device_match = binding_device_id.empty() || binding_device_id == event_device_id;
+	if (!device_match && !binding_device_stable_id.empty() && binding_device_stable_id == event_device_stable_id) {
+		device_match = true;
+	}
+	if (!device_match && !binding_device_type_id.empty() && binding_device_type_id == event_device_type_id) {
+		device_match = true;
+	}
+	if (!device_match) {
+		const bool binding_xbox = is_xbox_like(binding_device_id, binding_device_type_id, binding_device_name);
+		const bool event_xbox = is_xbox_like(event_device_id, event_device_type_id, event_device_name);
+		if (binding_xbox && event_xbox) {
+			device_match = true;
+		}
+	}
+	return device_match;
+}
+
+bool button_combo_contains_event(const std::vector<JoypadButtonComboEntry> &combo, const JoypadEvent &event)
+{
+	for (const auto &entry : combo) {
+		if (entry.button != event.button) {
+			continue;
+		}
+		if (device_matches_input(entry.device_id, entry.device_stable_id, entry.device_type_id,
+					 entry.device_name, event.device_id, event.device_stable_id,
+					 event.device_type_id, event.device_name)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+bool button_combo_is_active(const JoypadBinding &binding, const JoypadInputManager *input)
+{
+	if (!input) {
+		return binding.button > 0;
+	}
+	if (binding.button_combo.empty()) {
+		return input->IsButtonPressed(binding.device_id, binding.device_stable_id, binding.device_type_id,
+					      binding.button);
+	}
+	for (const auto &entry : binding.button_combo) {
+		if (!input->IsButtonPressed(entry.device_id, entry.device_stable_id, entry.device_type_id,
+					    entry.button)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+std::string button_combo_state_key(const JoypadBinding &binding)
+{
+	if (binding.uid > 0) {
+		return "combo:" + std::to_string((long long)binding.uid);
+	}
+
+	std::string key = "combo:";
+	for (const auto &entry : binding.button_combo) {
+		key += entry.device_id;
+		key += "|";
+		key += entry.device_stable_id;
+		key += "|";
+		key += entry.device_type_id;
+		key += "|";
+		key += std::to_string(entry.button);
+		key += ";";
+	}
+	key += std::to_string((int)binding.action);
+	key += ":";
+	key += binding.source_name;
+	key += ":";
+	key += binding.filter_name;
+	return key;
+}
+
+void sync_legacy_button_from_combo(JoypadBinding &binding)
+{
+	if (binding.input_type != JoypadInputType::Button) {
+		binding.button = -1;
+		binding.button_combo.clear();
+		return;
+	}
+
+	if (binding.button_combo.empty() && binding.button > 0) {
+		JoypadButtonComboEntry entry;
+		entry.device_id = binding.device_id;
+		entry.device_stable_id = binding.device_stable_id;
+		entry.device_type_id = binding.device_type_id;
+		entry.device_name = binding.device_name;
+		entry.button = binding.button;
+		binding.button_combo.push_back(std::move(entry));
+	}
+
+	if (!binding.button_combo.empty()) {
+		const auto &primary = binding.button_combo.front();
+		binding.button = primary.button;
+		binding.device_id = primary.device_id;
+		binding.device_stable_id = primary.device_stable_id;
+		binding.device_type_id = primary.device_type_id;
+		binding.device_name = primary.device_name;
+	}
 }
 
 void profile_hotkey_callback(void *data, obs_hotkey_id id, obs_hotkey_t *hotkey, bool pressed)
@@ -122,6 +231,25 @@ static void load_binding_from_data(JoypadBinding &binding, obs_data_t *data)
 	}
 	binding.device_name = obs_data_get_string(data, "device_name");
 	binding.button = (int)obs_data_get_int(data, "button");
+	binding.button_combo.clear();
+	if (obs_data_array_t *combo_array = obs_data_get_array(data, "button_combo")) {
+		const size_t combo_count = obs_data_array_count(combo_array);
+		for (size_t i = 0; i < combo_count; ++i) {
+			if (obs_data_t *item = obs_data_array_item(combo_array, i)) {
+				JoypadButtonComboEntry entry;
+				entry.device_id = obs_data_get_string(item, "device_id");
+				entry.device_stable_id = obs_data_get_string(item, "device_stable_id");
+				entry.device_type_id = obs_data_get_string(item, "device_type_id");
+				entry.device_name = obs_data_get_string(item, "device_name");
+				entry.button = (int)obs_data_get_int(item, "button");
+				if (entry.button > 0) {
+					binding.button_combo.push_back(std::move(entry));
+				}
+				obs_data_release(item);
+			}
+		}
+		obs_data_array_release(combo_array);
+	}
 	binding.input_type = (JoypadInputType)obs_data_get_int(data, "input_type");
 	binding.axis_index = (int)obs_data_get_int(data, "axis_index");
 	binding.axis_direction = (JoypadAxisDirection)obs_data_get_int(data, "axis_direction");
@@ -207,6 +335,7 @@ static void load_binding_from_data(JoypadBinding &binding, obs_data_t *data)
 	if (obs_data_has_user_value(data, "enabled")) {
 		binding.enabled = obs_data_get_bool(data, "enabled");
 	}
+	sync_legacy_button_from_combo(binding);
 }
 
 static void save_binding_to_data(const JoypadBinding &binding, obs_data_t *data)
@@ -217,6 +346,21 @@ static void save_binding_to_data(const JoypadBinding &binding, obs_data_t *data)
 	obs_data_set_string(data, "device_type_id", binding.device_type_id.c_str());
 	obs_data_set_string(data, "device_name", binding.device_name.c_str());
 	obs_data_set_int(data, "button", binding.button);
+	if (!binding.button_combo.empty()) {
+		obs_data_array_t *combo_array = obs_data_array_create();
+		for (const auto &entry : binding.button_combo) {
+			obs_data_t *item = obs_data_create();
+			obs_data_set_string(item, "device_id", entry.device_id.c_str());
+			obs_data_set_string(item, "device_stable_id", entry.device_stable_id.c_str());
+			obs_data_set_string(item, "device_type_id", entry.device_type_id.c_str());
+			obs_data_set_string(item, "device_name", entry.device_name.c_str());
+			obs_data_set_int(item, "button", entry.button);
+			obs_data_array_push_back(combo_array, item);
+			obs_data_release(item);
+		}
+		obs_data_set_array(data, "button_combo", combo_array);
+		obs_data_array_release(combo_array);
+	}
 	obs_data_set_int(data, "input_type", (int)binding.input_type);
 	if (binding.input_type == JoypadInputType::Axis) {
 		obs_data_set_int(data, "axis_index", binding.axis_index);
@@ -330,6 +474,7 @@ void JoypadConfigStore::Load()
 	profiles_.clear();
 	current_profile_index_ = 0;
 	axis_active_.clear();
+	button_combo_last_dispatch_.clear();
 	dirty_ = false;
 
 	ensure_config_dir();
@@ -862,7 +1007,8 @@ std::vector<JoypadBinding> JoypadConfigStore::GetBindingsSnapshot() const
 	return {};
 }
 
-std::vector<JoypadBinding> JoypadConfigStore::FindMatchingBindings(const JoypadEvent &event) const
+std::vector<JoypadBinding> JoypadConfigStore::FindMatchingBindings(const JoypadEvent &event,
+								   const JoypadInputManager *input) const
 {
 	std::vector<JoypadBinding> matches;
 	const auto now = std::chrono::steady_clock::now();
@@ -873,6 +1019,7 @@ std::vector<JoypadBinding> JoypadConfigStore::FindMatchingBindings(const JoypadE
 	const auto &current_bindings = profiles_[current_profile_index_].bindings;
 	for (const auto &binding_ref : current_bindings) {
 		JoypadBinding binding = binding_ref;
+		sync_legacy_button_from_combo(binding);
 		if (!binding.enabled) {
 			continue;
 		}
@@ -996,28 +1143,38 @@ std::vector<JoypadBinding> JoypadConfigStore::FindMatchingBindings(const JoypadE
 				axis_last_dispatch_[interval_key] = now;
 			}
 		} else {
-			if (event.is_axis || binding.button != event.button) {
+			if (event.is_axis) {
+				continue;
+			}
+			if (!binding.button_combo.empty()) {
+				const std::string combo_key = button_combo_state_key(binding);
+				if (!button_combo_contains_event(binding.button_combo, event)) {
+					continue;
+				}
+				const bool combo_active_now = button_combo_is_active(binding, input);
+				if (!combo_active_now) {
+					continue;
+				}
+				const auto it_last = button_combo_last_dispatch_.find(combo_key);
+				if (it_last != button_combo_last_dispatch_.end()) {
+					const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+								     now - it_last->second)
+								     .count();
+					if (elapsed < 75) {
+						continue;
+					}
+				}
+				button_combo_last_dispatch_[combo_key] = now;
+				matches.push_back(binding);
+				continue;
+			}
+			if (binding.button != event.button) {
 				continue;
 			}
 		}
-		bool device_match = binding.device_id.empty() || binding.device_id == event.device_id;
-		if (!device_match && !binding.device_stable_id.empty() &&
-		    binding.device_stable_id == event.device_stable_id) {
-			device_match = true;
-		}
-		if (!device_match && !binding.device_type_id.empty() &&
-		    binding.device_type_id == event.device_type_id) {
-			device_match = true;
-		}
-		if (!device_match) {
-			const bool binding_xbox =
-				is_xbox_like(binding.device_id, binding.device_type_id, binding.device_name);
-			const bool event_xbox = is_xbox_like(event.device_id, event.device_type_id, event.device_name);
-			if (binding_xbox && event_xbox) {
-				device_match = true;
-			}
-		}
-		if (!device_match) {
+		if (!device_matches_input(binding.device_id, binding.device_stable_id, binding.device_type_id,
+					  binding.device_name, event.device_id, event.device_stable_id,
+					  event.device_type_id, event.device_name)) {
 			continue;
 		}
 		matches.push_back(binding);
@@ -1162,6 +1319,16 @@ bool JoypadConfigStore::ExportProfile(int index, const std::string &filepath)
 		// Keep exported profiles portable and less device-specific.
 		// Resolution will still work via device_id/device_type_id matching.
 		obs_data_erase(item, "device_stable_id");
+		if (obs_data_array_t *combo_array = obs_data_get_array(item, "button_combo")) {
+			const size_t combo_count = obs_data_array_count(combo_array);
+			for (size_t i = 0; i < combo_count; ++i) {
+				if (obs_data_t *combo_item = obs_data_array_item(combo_array, i)) {
+					obs_data_erase(combo_item, "device_stable_id");
+					obs_data_release(combo_item);
+				}
+			}
+			obs_data_array_release(combo_array);
+		}
 		obs_data_array_push_back(arr, item);
 		obs_data_release(item);
 	}
