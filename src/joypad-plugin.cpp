@@ -66,7 +66,16 @@ QString BuildOsdStyle(const QString &text_color, const QString &background_color
 QString ToCssColor(const QString &input, const QString &fallback);
 
 std::mutex g_absolute_axis_mutex;
-std::unordered_map<std::string, double> g_absolute_axis_last_raw;
+struct AbsoluteAxisDispatchState {
+	double raw = 0.0;
+	double normalized = 0.0;
+	std::chrono::steady_clock::time_point when = {};
+};
+std::unordered_map<std::string, AbsoluteAxisDispatchState> g_absolute_axis_last_state;
+
+constexpr double kAbsoluteAxisRawEpsilon = 2.0;
+constexpr double kAbsoluteAxisNormalizedEpsilon = 0.01;
+constexpr auto kAbsoluteAxisMinDispatchInterval = std::chrono::milliseconds(35);
 
 std::string BuildAbsoluteAxisKey(const JoypadBinding &binding, const JoypadEvent &event)
 {
@@ -83,19 +92,30 @@ bool ShouldDispatchAbsoluteAxisValue(const JoypadBinding &binding, const JoypadE
 	}
 	const std::string key = BuildAbsoluteAxisKey(binding, event);
 	const double raw = event.axis_raw_value;
+	const double normalized = event.axis_value;
+	const auto now = std::chrono::steady_clock::now();
 	std::lock_guard<std::mutex> lock(g_absolute_axis_mutex);
-	auto it = g_absolute_axis_last_raw.find(key);
-	if (it != g_absolute_axis_last_raw.end() && std::fabs(it->second - raw) < 0.000001) {
-		return false;
+	auto it = g_absolute_axis_last_state.find(key);
+	if (it != g_absolute_axis_last_state.end()) {
+		const auto &previous = it->second;
+		const bool raw_unchanged = std::fabs(previous.raw - raw) <= kAbsoluteAxisRawEpsilon;
+		const bool normalized_unchanged = std::fabs(previous.normalized - normalized) <=
+						  kAbsoluteAxisNormalizedEpsilon;
+		if (raw_unchanged && normalized_unchanged) {
+			return false;
+		}
+		if ((now - previous.when) < kAbsoluteAxisMinDispatchInterval) {
+			return false;
+		}
 	}
-	g_absolute_axis_last_raw[key] = raw;
+	g_absolute_axis_last_state[key] = {raw, normalized, now};
 	return true;
 }
 
 void ClearAbsoluteAxisDispatchCache()
 {
 	std::lock_guard<std::mutex> lock(g_absolute_axis_mutex);
-	g_absolute_axis_last_raw.clear();
+	g_absolute_axis_last_state.clear();
 }
 
 void *AddObsDockCompat(const char *dock_id, const char *title, void *dock_content_widget, void *legacy_qdock_widget)

@@ -51,6 +51,11 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 namespace {
 constexpr int kMaxTrackedAxes = 8;
 constexpr double kAxisContinuousHoldThreshold = 0.01;
+constexpr double kAxisCenterRawValue = 512.0;
+constexpr double kAxisCenterRawTolerance = 2.0;
+constexpr double kAxisCenterNormalizedTolerance = 0.01;
+constexpr double kAxisCenterSnapMinDelta = 100.0;
+constexpr int kAxisCenterSnapSuppressionThreshold = 2;
 
 #ifdef _WIN32
 struct DiControllerInfo {
@@ -1120,6 +1125,35 @@ void JoypadInputManager::PollLoop()
 					}
 				}
 				state.last_buttons = buttons;
+
+				if (!state.is_xinput) {
+					int centered_snap_count = 0;
+					for (int i = 0; i < axes_to_read; ++i) {
+						if (!state.axis_initialized[i]) {
+							continue;
+						}
+						double normalized = axis_values[(size_t)i];
+						double raw = ((normalized + 1.0) * 0.5) * 1024.0;
+						double prev_raw = state.last_axes[i];
+						const bool near_center = std::fabs(raw - kAxisCenterRawValue) <=
+										 kAxisCenterRawTolerance &&
+									 std::fabs(normalized) <=
+										 kAxisCenterNormalizedTolerance;
+						const bool snapped_from_far =
+							std::fabs(prev_raw - kAxisCenterRawValue) >=
+							kAxisCenterSnapMinDelta;
+						if (near_center && snapped_from_far) {
+							++centered_snap_count;
+						}
+					}
+					if (centered_snap_count >= kAxisCenterSnapSuppressionThreshold) {
+						for (int i = axes_to_read; i < kMaxTrackedAxes; ++i) {
+							state.axis_initialized[i] = false;
+							state.last_axes[i] = 0.0;
+						}
+						continue;
+					}
+				}
 
 				for (int i = 0; i < axes_to_read; ++i) {
 					double normalized = axis_values[(size_t)i];

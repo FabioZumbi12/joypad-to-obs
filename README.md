@@ -176,6 +176,12 @@ pwsh -File .\scripts\ci-local-windows.ps1 -DebugLogs
 ## License
 This plugin is released under the GPLv2 license.
 
+## Content Provenance
+
+The source code, README text, and the repository banner in `img/banner.svg` are maintained as project-authored assets for this plugin repository.
+
+If third-party assets, screenshots, icons, store text, or promotional images are used in future releases or plugin-directory submissions, they should only be published when the project has the required rights, attribution, and any policy-required disclosure.
+
 ## Support the Project
 
 If Joypad to OBS helps your workflow, consider supporting the project or following my work here:  
