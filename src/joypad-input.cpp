@@ -51,13 +51,14 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 namespace {
 constexpr int kMaxTrackedAxes = 8;
 constexpr double kAxisContinuousHoldThreshold = 0.01;
+
+#ifdef _WIN32
 constexpr double kAxisCenterRawValue = 512.0;
 constexpr double kAxisCenterRawTolerance = 2.0;
 constexpr double kAxisCenterNormalizedTolerance = 0.01;
 constexpr double kAxisCenterSnapMinDelta = 100.0;
 constexpr int kAxisCenterSnapSuppressionThreshold = 2;
 
-#ifdef _WIN32
 struct DiControllerInfo {
 	IDirectInputDevice8W *device = nullptr;
 	std::string id;
