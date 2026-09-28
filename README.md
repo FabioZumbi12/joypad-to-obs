@@ -59,6 +59,7 @@ Joypad to OBS supports a comprehensive set of commands to manage your stream:
 ### 📡 Output & Tools
 *   **Toggle Streaming:** Start/stop streaming.
 *   **Toggle Recording:** Start/stop recording.
+*   **Pause/Resume Recording:** Pause or resume an active recording.
 *   **Toggle Virtual Camera:** Start/stop virtual camera.
 
 ## Dock Panel

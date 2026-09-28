@@ -56,6 +56,7 @@ enum class JoypadActionType {
 	StopReplayBuffer = 25,
 	ToggleReplayBuffer = 26,
 	SaveReplayBuffer = 27,
+	ToggleRecordingPause = 28,
 };
 
 enum class JoypadInputType {

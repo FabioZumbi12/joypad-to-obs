@@ -205,6 +205,8 @@ QString action_to_text(JoypadActionType action)
 		return L("JoypadToOBS.Action.ToggleStreaming");
 	case JoypadActionType::ToggleRecording:
 		return L("JoypadToOBS.Action.ToggleRecording");
+	case JoypadActionType::ToggleRecordingPause:
+		return L("JoypadToOBS.Action.ToggleRecordingPause");
 	case JoypadActionType::ToggleVirtualCam:
 		return L("JoypadToOBS.Action.ToggleVirtualCam");
 	case JoypadActionType::ToggleStudioMode:
@@ -863,6 +865,8 @@ public:
 				       (int)JoypadActionType::ToggleStreaming);
 		action_combo_->addItem(action_to_text(JoypadActionType::ToggleRecording),
 				       (int)JoypadActionType::ToggleRecording);
+		action_combo_->addItem(action_to_text(JoypadActionType::ToggleRecordingPause),
+				       (int)JoypadActionType::ToggleRecordingPause);
 		action_combo_->addItem(action_to_text(JoypadActionType::ToggleVirtualCam),
 				       (int)JoypadActionType::ToggleVirtualCam);
 		action_combo_->addItem(action_to_text(JoypadActionType::ToggleStudioMode),
